@@ -4,6 +4,7 @@ import {
   Trash2, LayoutDashboard, ListChecks, TrendingUp, X, Clock,
   Search, Settings, FolderOpen, Edit2, Folder, Circle, Save
 } from 'lucide-react';
+import Onboarding from './Onboarding';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const STORAGE_TASKS = 'sbs_tasks_v4';
@@ -52,12 +53,15 @@ export default function StepByStepApp() {
   const [filterProject, setFilterProject] = useState('tous');
   const [search, setSearch]     = useState('');
   const [newSubtask, setNewSubtask] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !localStorage.getItem('sbs_onboarded')
+  );
 
   // Modals
-  const [showNew, setShowNew]           = useState(false);
+  const [showNew, setShowNew]               = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
-  const [editingTask, setEditingTask]   = useState(null); // task en cours d'édition
-  const [editProjectId, setEditProjectId] = useState(null);
+  const [editingTask, setEditingTask]       = useState(null);
+  const [editProjectId, setEditProjectId]   = useState(null);
 
   // Forms
   const emptyForm = { title: '', priority: 'medium', dueDate: '', reminder: false, projectId: projects[0]?.id || '' };
@@ -69,7 +73,6 @@ export default function StepByStepApp() {
 
   const upd = (fn) => setTasks(p => { const n = fn(p); saveData(STORAGE_TASKS, n); return n; });
 
-  // ── TÂCHES ──
   const openNew = () => { setForm({ ...emptyForm, projectId: projects[0]?.id || '' }); setShowNew(true); };
 
   const createTask = () => {
@@ -99,7 +102,6 @@ export default function StepByStepApp() {
     upd(p => p.map(t => { if (t.id !== tid) return t; const n = { ...t, reminder: !t.reminder }; if (n.reminder && n.dueDate) scheduleNotif(n); return n; }));
   };
 
-  // ── PROJETS ──
   const createProject = () => {
     if (!projectForm.name.trim()) return;
     const p = { id: generateId(), name: projectForm.name.trim(), color: projectForm.color };
@@ -117,32 +119,27 @@ export default function StepByStepApp() {
 
   const getProject = (pid) => projects.find(p => p.id === pid);
 
-  // ── DONNÉES FILTRÉES ──
   const filtered = tasks.filter(t => {
     const ms = t.title.toLowerCase().includes(search.toLowerCase());
     const mp = filterProject === 'tous' || t.projectId === filterProject;
     return ms && mp;
   });
-  const pending  = tasks.filter(t => getPct(t) < 100);
-  const done     = tasks.filter(t => getPct(t) === 100);
+  const pending   = tasks.filter(t => getPct(t) < 100);
+  const done      = tasks.filter(t => getPct(t) === 100);
   const reminders = tasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
-  const selected = tasks.find(t => t.id === selectedId);
-  const today    = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const selected  = tasks.find(t => t.id === selectedId);
+  const today     = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  // ── CSS ──
   const css = `
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     .sbs { background: #F8FAF9; min-height: 100vh; color: #111827; font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; }
-
     .sbs-header { background: #fff; border-bottom: 0.5px solid #E5E7EB; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
     .sbs-logo { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: ${EM_DARK}; }
     .sbs-logo-icon { width: 28px; height: 28px; border-radius: 8px; background: ${EM}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .sbs-icon-btn { width: 34px; height: 34px; border-radius: 8px; border: 0.5px solid #E5E7EB; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6B7280; }
     .sbs-icon-btn:hover { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; }
-
     .sbs-body { display: grid; grid-template-columns: 224px 1fr; min-height: calc(100vh - 56px); }
-
     .sbs-sidebar { background: #fff; border-right: 0.5px solid #E5E7EB; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; }
     .sbs-sl { font-size: 10px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 10px; margin: 14px 0 5px; }
     .sbs-nav { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; color: #6B7280; border: none; background: none; width: 100%; text-align: left; font-family: inherit; }
@@ -150,35 +147,29 @@ export default function StepByStepApp() {
     .sbs-nav.active { background: ${EM_LIGHT}; color: ${EM_DARK}; font-weight: 500; }
     .sbs-badge { margin-left: auto; border-radius: 20px; font-size: 10px; padding: 1px 6px; font-weight: 600; background: ${EM}; color: #fff; }
     .sbs-badge.amber { background: ${AMBER}; }
-
     .sbs-proj-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #6B7280; }
     .sbs-proj-row:hover { background: #F9FAFB; }
     .sbs-proj-row.active { background: ${EM_LIGHT}; color: ${EM_DARK}; }
     .sbs-proj-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .sbs-proj-edit { margin-left: auto; opacity: 0; background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 2px; display: flex; }
     .sbs-proj-row:hover .sbs-proj-edit { opacity: 1; }
-
     .sbs-content { padding: 24px; }
     .sbs-ch { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
     .sbs-pt { font-size: 20px; font-weight: 600; color: #111827; }
     .sbs-ps { font-size: 13px; color: #9CA3AF; margin-top: 3px; }
-
     .btn-p { background: ${EM}; color: #fff; border: none; border-radius: 8px; padding: 9px 15px; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
     .btn-p:hover { background: ${EM_DARK}; }
     .btn-p:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-s { background: #fff; color: #374151; border: 0.5px solid #D1D5DB; border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
     .btn-s:hover { border-color: #9CA3AF; }
     .btn-danger { background: #fff; color: #EF4444; border: 0.5px solid #FECACA; border-radius: 7px; padding: 5px 9px; cursor: pointer; display: flex; align-items: center; font-family: inherit; }
-
     .sbs-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 20px; }
     .sbs-stat { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; }
     .sbs-sv { font-size: 24px; font-weight: 600; color: #111827; }
     .sbs-sv.g { color: ${EM}; }
     .sbs-sl2 { font-size: 12px; color: #6B7280; margin-top: 2px; }
     .sbs-ssub { font-size: 11px; color: #9CA3AF; margin-top: 1px; }
-
     .sbs-banner { background: ${EM_LIGHT}; border: 0.5px solid ${EM_MID}; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 13px; color: ${EM_DARK}; }
-
     .sec-label { font-size: 10.5px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
     .task-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
     .task-card { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 13px 16px; cursor: pointer; transition: border-color 0.15s; }
@@ -196,10 +187,8 @@ export default function StepByStepApp() {
     .notif-pill { font-size: 11px; background: ${EM_LIGHT}; color: ${EM_DARK}; padding: 2px 7px; border-radius: 20px; display: flex; align-items: center; gap: 3px; }
     .prog { height: 3px; background: #F3F4F6; border-radius: 2px; margin-top: 10px; margin-left: 29px; overflow: hidden; }
     .prog-fill { height: 100%; background: ${EM}; border-radius: 2px; transition: width 0.3s; }
-
     .add-btn { border: 1.5px dashed #E5E7EB; border-radius: 10px; padding: 11px 16px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: #9CA3AF; font-size: 13.5px; font-family: inherit; background: none; width: 100%; margin-top: 4px; }
     .add-btn:hover { border-color: ${EM_MID}; color: ${EM}; background: ${EM_LIGHT}; }
-
     .sub-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 0.5px solid #F9FAFB; }
     .cb { width: 20px; height: 20px; min-width: 20px; border-radius: 6px; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
     .cb.done { background: ${EM}; border-color: ${EM}; }
@@ -207,16 +196,13 @@ export default function StepByStepApp() {
     .sub-t.done { text-decoration: line-through; color: #9CA3AF; }
     .del-btn { background: none; border: none; cursor: pointer; color: #D1D5DB; padding: 2px; display: flex; }
     .del-btn:hover { color: #EF4444; }
-
     .sbs-search-w { position: relative; margin-bottom: 14px; }
     .sbs-search { width: 100%; padding: 8px 12px 8px 36px; border: 0.5px solid #E5E7EB; border-radius: 8px; font-size: 13.5px; outline: none; font-family: inherit; background: #fff; }
     .sbs-search:focus { border-color: ${EM_MID}; }
     .si { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #9CA3AF; pointer-events: none; }
-
     .filters { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
     .filter-btn { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-family: inherit; cursor: pointer; border: 0.5px solid #E5E7EB; background: #fff; color: #6B7280; }
     .filter-btn.active { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; font-weight: 500; }
-
     .sbs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.38); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
     .sbs-modal { background: #fff; border-radius: 14px; padding: 24px; width: 100%; max-width: 450px; }
     .modal-sm { max-width: 360px; }
@@ -227,18 +213,11 @@ export default function StepByStepApp() {
     .toggle-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F9FAFB; border-radius: 8px; cursor: pointer; }
     .toggle { width: 36px; height: 20px; border-radius: 10px; position: relative; flex-shrink: 0; }
     .toggle-th { width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; }
-
     .color-picker { display: flex; gap: 8px; flex-wrap: wrap; }
     .color-dot { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 2px solid transparent; }
     .color-dot.selected { border-color: #111827; }
-
     .reminder-btn { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 5px 10px; border-radius: 7px; border: 0.5px solid #E5E7EB; cursor: pointer; background: #fff; font-family: inherit; color: #6B7280; }
     .reminder-btn.on { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; }
-
-    .proj-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-    .proj-mgmt-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F9FAFB; border-radius: 8px; }
-    .proj-mgmt-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-
     .empty { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 40px 20px; text-align: center; color: #9CA3AF; }
     .empty a { color: ${EM}; cursor: pointer; font-weight: 500; }
   `;
@@ -247,16 +226,30 @@ export default function StepByStepApp() {
     <div className="sbs">
       <style>{css}</style>
 
+      {/* ONBOARDING */}
+      {showOnboarding && (
+        <Onboarding
+          onComplete={() => {
+            localStorage.setItem('sbs_onboarded', '1');
+            setShowOnboarding(false);
+          }}
+          onCreateProject={(proj) => {
+            const p = { id: generateId(), ...proj };
+            setProjects(prev => [...prev, p]);
+          }}
+        />
+      )}
+
       {/* HEADER */}
       <header className="sbs-header">
         <div className="sbs-logo">
           <div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div>
           Step by Step
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button className="sbs-icon-btn"><Search size={16} /></button>
           <button className="sbs-icon-btn"><Bell size={16} /></button>
-          <button className="sbs-icon-btn"><Settings size={16} /></button>
+          <button className="sbs-icon-btn" title="Revoir l'intro" onClick={() => { localStorage.removeItem('sbs_onboarded'); setShowOnboarding(true); }}><Settings size={16} /></button>
         </div>
       </header>
 
@@ -304,7 +297,7 @@ export default function StepByStepApp() {
         {/* CONTENT */}
         <main className="sbs-content">
 
-          {/* ── DASHBOARD ── */}
+          {/* DASHBOARD */}
           {view === 'dashboard' && <>
             <div className="sbs-ch">
               <div>
@@ -313,25 +306,20 @@ export default function StepByStepApp() {
               </div>
               <button className="btn-p" onClick={openNew}><Plus size={15} /> Nouvelle tâche</button>
             </div>
-
             {reminders.length > 0 && (
               <div className="sbs-banner"><Bell size={16} color={EM} /><span><strong style={{ fontWeight: 600 }}>{reminders.length} rappel{reminders.length > 1 ? 's' : ''} actif{reminders.length > 1 ? 's' : ''}</strong> — {reminders[0].title}</span></div>
             )}
-
             <div className="sbs-stats">
               <div className="sbs-stat"><div className="sbs-sv g">{done.length}</div><div className="sbs-sl2">Terminées</div><div className="sbs-ssub">sur {tasks.length}</div></div>
               <div className="sbs-stat"><div className="sbs-sv">{pending.length}</div><div className="sbs-sl2">En cours</div><div className="sbs-ssub">{reminders.length} avec rappel</div></div>
               <div className="sbs-stat"><div className="sbs-sv g">{tasks.length ? Math.round(done.length / tasks.length * 100) : 0}%</div><div className="sbs-sl2">Complétion</div></div>
             </div>
-
             {tasks.length === 0 ? (
               <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche pour le moment.</p><a onClick={openNew}>Créer une tâche →</a></div>
             ) : <>
               {pending.length > 0 && <>
                 <div className="sec-label">En cours</div>
-                <div className="task-list">
-                  {pending.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}
-                </div>
+                <div className="task-list">{pending.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}</div>
               </>}
               {done.length > 0 && <>
                 <div className="sec-label">Terminées</div>
@@ -347,7 +335,7 @@ export default function StepByStepApp() {
             <button className="add-btn" onClick={openNew}><Plus size={16} /> Ajouter une tâche...</button>
           </>}
 
-          {/* ── TÂCHES ── */}
+          {/* TÂCHES */}
           {view === 'tasks' && <>
             <div className="sbs-ch">
               <div>
@@ -371,7 +359,7 @@ export default function StepByStepApp() {
             }
           </>}
 
-          {/* ── DETAIL ── */}
+          {/* DETAIL */}
           {view === 'detail' && selected && (() => {
             const pct = getPct(selected); const pri = PRIORITY[selected.priority]; const due = formatDue(selected.dueDate); const proj = getProject(selected.projectId);
             const isEditing = !!editingTask;
@@ -423,7 +411,6 @@ export default function StepByStepApp() {
                     )}
                   </div>
                 </div>
-
                 {selected.subtasks.length > 0 && <>
                   <div style={{ height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: EM, borderRadius: 3, transition: 'width 0.3s' }} />
@@ -433,7 +420,6 @@ export default function StepByStepApp() {
                     <span style={{ color: pct === 100 ? EM : '#9CA3AF', fontWeight: pct === 100 ? 600 : 400 }}>{pct}%{pct === 100 ? ' — Terminé !' : ''}</span>
                   </div>
                 </>}
-
                 <div className="sec-label" style={{ marginBottom: 6 }}>Sous-tâches</div>
                 {selected.subtasks.map(sub => (
                   <div key={sub.id} className="sub-row">
@@ -451,7 +437,7 @@ export default function StepByStepApp() {
             </>;
           })()}
 
-          {/* ── PROGRESSION ── */}
+          {/* PROGRESSION */}
           {view === 'progress' && <>
             <div className="sbs-ch"><div><div className="sbs-pt">Progression</div><div className="sbs-ps">Vue globale</div></div></div>
             <div className="sbs-stats">
@@ -510,7 +496,7 @@ export default function StepByStepApp() {
         </main>
       </div>
 
-      {/* ── MODAL NOUVELLE TÂCHE ── */}
+      {/* MODAL NOUVELLE TÂCHE */}
       {showNew && (
         <div className="sbs-overlay" onClick={() => setShowNew(false)}>
           <div className="sbs-modal" onClick={e => e.stopPropagation()}>
@@ -552,7 +538,7 @@ export default function StepByStepApp() {
         </div>
       )}
 
-      {/* ── MODAL NOUVEAU PROJET ── */}
+      {/* MODAL NOUVEAU PROJET */}
       {showNewProject && (
         <div className="sbs-overlay" onClick={() => setShowNewProject(false)}>
           <div className="sbs-modal modal-sm" onClick={e => e.stopPropagation()}>
@@ -579,7 +565,7 @@ export default function StepByStepApp() {
         </div>
       )}
 
-      {/* ── MODAL ÉDITION PROJET ── */}
+      {/* MODAL ÉDITION PROJET */}
       {editProjectId && (() => {
         const proj = projects.find(p => p.id === editProjectId);
         if (!proj) return null;
@@ -618,7 +604,6 @@ export default function StepByStepApp() {
   );
 }
 
-// Composant carte tâche réutilisable
 function TaskCard({ task, pct, proj, onClick }) {
   const pri = PRIORITY[task.priority]; const due = formatDue(task.dueDate);
   return (
