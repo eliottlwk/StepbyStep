@@ -1,550 +1,641 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { CheckCircle, Circle, Plus, ChevronRight, ChevronLeft, Settings, X, LayoutDashboard, ListTodo, BarChart2, Check, Flag, Tag, Clock, Calendar, Bell, Trash2 } from 'lucide-react';
-import TaskCreationWizard from './components/TaskCreationWizard';
+import React, { useState, useEffect } from 'react';
+import {
+  Check, Plus, ChevronLeft, ChevronRight, Bell, BellOff,
+  Trash2, LayoutDashboard, ListChecks, TrendingUp, X, Clock,
+  Search, Settings, FolderOpen, Edit2, Folder, Circle, Save
+} from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
+const STORAGE_TASKS = 'sbs_tasks_v4';
+const STORAGE_PROJECTS = 'sbs_projects_v1';
 
-const PRIORITY_CONFIG = {
-  high:   { label: 'Haute',   color: '#D94040', dot: '#D94040' },
-  medium: { label: 'Moyenne', color: '#D97B2A', dot: '#D97B2A' },
-  low:    { label: 'Basse',   color: '#5A9E6F', dot: '#5A9E6F' },
+const loadData = (key, fallback) => { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback; } catch { return fallback; } };
+const saveData = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+
+const DEFAULT_PROJECTS = [
+  { id: 'p1', name: 'Personnel',    color: '#059669' },
+  { id: 'p2', name: 'École',        color: '#8B5CF6' },
+  { id: 'p3', name: 'Elevia Agency',color: '#2563EB' },
+];
+
+const EM = '#059669'; const EM_LIGHT = '#D1FAE5'; const EM_DARK = '#065F46'; const EM_MID = '#6EE7B7';
+const AMBER = '#F59E0B';
+const PRIORITY = {
+  high:   { label: 'Urgent', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+  medium: { label: 'Moyen',  bg: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
+  low:    { label: 'Faible', bg: '#F0FDF4', color: '#166534', border: '#BBF7D0' },
+};
+const PROJECT_COLORS = ['#059669','#2563EB','#8B5CF6','#F59E0B','#EF4444','#EC4899','#0891B2','#64748B'];
+
+const formatDue = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso), now = new Date();
+  const diff = Math.floor((d - now) / 86400000);
+  if (diff < 0) return { label: 'En retard', alert: true };
+  if (diff === 0) return { label: 'Auj. ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), alert: true };
+  if (diff === 1) return { label: 'Demain', alert: false };
+  return { label: d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }), alert: false };
 };
 
-const formatDate = (d) => {
-  if (!d) return null;
-  const dt = new Date(d); dt.setHours(0,0,0,0);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
-  if (dt.getTime() === today.getTime()) return "Aujourd'hui";
-  if (dt.getTime() === tomorrow.getTime()) return "Demain";
-  const diff = Math.ceil((dt - today) / (1000*60*60*24));
-  if (diff < 0) return `En retard (${dt.toLocaleDateString('fr-FR',{day:'numeric',month:'short'})})`;
-  return dt.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+const scheduleNotif = (task) => {
+  if (!task.reminder || !task.dueDate) return;
+  const delay = new Date(task.dueDate).getTime() - 30 * 60 * 1000 - Date.now();
+  if (delay <= 0) return;
+  setTimeout(() => { if (Notification.permission === 'granted') new Notification('Step by Step', { body: `Rappel : ${task.title}` }); }, delay);
 };
 
-const isOverdue = (d) => {
-  if (!d) return false;
-  const dt = new Date(d); dt.setHours(0,0,0,0);
-  const today = new Date(); today.setHours(0,0,0,0);
-  return dt < today;
-};
+export default function StepByStepApp() {
+  const [tasks, setTasks]       = useState(() => loadData(STORAGE_TASKS, []));
+  const [projects, setProjects] = useState(() => loadData(STORAGE_PROJECTS, DEFAULT_PROJECTS));
+  const [view, setView]         = useState('dashboard');
+  const [selectedId, setSelectedId]   = useState(null);
+  const [filterProject, setFilterProject] = useState('tous');
+  const [search, setSearch]     = useState('');
+  const [newSubtask, setNewSubtask] = useState('');
 
-const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Inter', system-ui, sans-serif; background: #FAF8F5; }
-  .app-header { background: #FAF8F5; border-bottom: 1px solid #EDE8E0; position: sticky; top: 0; z-index: 40; }
-  .app-header-inner { max-width: 720px; margin: 0 auto; padding: 0 20px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
-  .app-logo { font-size: 16px; font-weight: 600; color: #1a1a1a; letter-spacing: -0.3px; }
-  .app-logo em { color: #C7552A; font-style: normal; }
-  .btn-icon { width: 34px; height: 34px; border: none; background: transparent; border-radius: 7px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #999; transition: background .15s, color .15s; }
-  .btn-icon:hover { background: #F0EBE3; color: #555; }
-  .app-nav-bar { background: #FAF8F5; padding: 0 20px; }
-  .app-nav-inner { max-width: 720px; margin: 0 auto; display: flex; border-bottom: 1px solid #EDE8E0; }
-  .nav-tab { padding: 10px 16px 11px; font-size: 13.5px; font-weight: 500; color: #999; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
-  .nav-tab:hover { color: #555; }
-  .nav-tab.active { color: #C7552A; border-bottom-color: #C7552A; }
-  .main-wrap { max-width: 720px; margin: 0 auto; padding: 24px 20px 80px; }
-  .card { background: #fff; border: 1px solid #EDE8E0; border-radius: 10px; padding: 18px 20px; margin-bottom: 10px; }
-  .card-hover { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
-  .card-hover:hover { border-color: #CFC9BF; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
-  .section-lbl { font-size: 11px; font-weight: 600; color: #BBB; text-transform: uppercase; letter-spacing: .08em; margin: 22px 0 8px; }
-  .btn { padding: 9px 15px; border-radius: 8px; font-size: 14px; font-weight: 500; border: none; cursor: pointer; transition: all .15s; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
-  .btn-terra { background: #C7552A; color: #fff; }
-  .btn-terra:hover { background: #B34D26; }
-  .btn-outline { background: transparent; color: #555; border: 1.5px solid #DDD8D0; }
-  .btn-outline:hover { border-color: #C5BDB4; }
-  .progress-track { height: 4px; background: #EDE8E0; border-radius: 4px; overflow: hidden; margin: 10px 0 0; }
-  .progress-fill { height: 100%; background: #C7552A; border-radius: 4px; transition: width .4s cubic-bezier(.4,0,.2,1); }
-  .progress-fill.green { background: #5A9E6F; }
-  .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-  .badge-warm { background: #FDF0EB; color: #C7552A; }
-  .badge-green { background: #EAF4EE; color: #3D7A52; }
-  .badge-gray { background: #F2EDE8; color: #999; }
-  .badge-red { background: #FFF0F0; color: #D94040; }
-  .cta-btn { width: 100%; padding: 14px; background: #C7552A; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: background .15s; font-family: inherit; margin-bottom: 10px; }
-  .cta-btn:hover { background: #B34D26; }
-  .focus-panel { background: #fff; border: 1px solid #EDE8E0; border-radius: 10px; padding: 18px 20px; margin-bottom: 10px; }
-  .focus-eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #C7552A; margin-bottom: 3px; }
-  .focus-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 12px; }
-  .focus-next { background: #FAF8F5; border-radius: 7px; padding: 12px 13px; display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
-  .focus-link { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 500; color: #C7552A; background: none; border: none; cursor: pointer; font-family: inherit; }
-  .focus-link:hover { opacity: .8; }
-  .back-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; color: #999; background: none; border: none; cursor: pointer; padding: 0; margin-bottom: 18px; font-family: inherit; transition: color .15s; }
-  .back-btn:hover { color: #333; }
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1a1a1a; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 500; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,.2); display: flex; align-items: center; gap: 8px; animation: toastUp .2s ease; white-space: nowrap; }
-  @keyframes toastUp { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .modal { background: #fff; border-radius: 14px; padding: 26px; max-width: 440px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,.1); }
-  .modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-  .modal-title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
-  .settings-row { padding: 13px 0; border-bottom: 1px solid #F2EDE8; }
-  .settings-row:last-of-type { border-bottom: none; }
-  .settings-row h4 { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 2px; }
-  .settings-row p { font-size: 13px; color: #AAA; }
-  .history-item { display: flex; align-items: center; gap: 9px; padding: 11px 0; border-bottom: 1px solid #F2EDE8; }
-  .history-item:last-child { border-bottom: none; }
-  .history-dot { width: 20px; height: 20px; border-radius: 50%; background: #EAF4EE; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .meta-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #999; }
-  .priority-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-  .empty-state { text-align: center; padding: 44px 20px; }
-  .empty-icon { font-size: 28px; margin-bottom: 12px; opacity: .45; }
-  .empty-title { font-size: 15px; font-weight: 600; color: #555; margin-bottom: 6px; }
-  .empty-desc { font-size: 13px; color: #AAA; margin-bottom: 18px; }
-  .detail-meta-card { background: #FAF8F5; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .detail-meta-item { display: flex; flex-direction: column; gap: 2px; }
-  .detail-meta-key { font-size: 11px; color: #BBB; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
-  .detail-meta-val { font-size: 13.5px; color: #333; font-weight: 500; display: flex; align-items: center; gap: 5px; }
-  .stats-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
-  .stat-box { background: #fff; border: 1px solid #EDE8E0; border-radius: 10px; padding: 14px 12px; text-align: center; }
-  .stat-num { font-size: 26px; font-weight: 600; color: #1a1a1a; letter-spacing: -.5px; line-height: 1; margin-bottom: 3px; }
-  .stat-lbl { font-size: 11.5px; color: #AAA; }
-  .overdue-alert { background: #FFF8F8; border: 1px solid #F5CECE; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #C04040; font-weight: 500; }
-  .ob-wrap { min-height: 100vh; background: #FAF8F5; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .ob-card { background: #fff; border-radius: 14px; padding: 36px 32px; max-width: 400px; width: 100%; border: 1px solid #EDE8E0; }
-  .ob-icon { font-size: 32px; margin-bottom: 18px; display: block; }
-  .ob-title { font-size: 20px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; letter-spacing: -.3px; }
-  .ob-desc { font-size: 14px; color: #777; line-height: 1.65; margin-bottom: 26px; }
-  .ob-dots { display: flex; gap: 6px; margin-bottom: 24px; }
-  .ob-dot { height: 3px; border-radius: 2px; transition: all .25s; }
-  .ob-dot.on { background: #C7552A; width: 22px; }
-  .ob-dot.off { background: #E5E0D8; width: 8px; }
-  .ob-row { display: flex; gap: 8px; }
+  // Modals
+  const [showNew, setShowNew]           = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [editingTask, setEditingTask]   = useState(null); // task en cours d'édition
+  const [editProjectId, setEditProjectId] = useState(null);
 
-  /* ── Subtask rows ── */
-  .subtask-row { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 7px; transition: background .12s; }
-  .subtask-row:hover { background: #FAF8F5; }
-  .subtask-row:hover .sub-delete { opacity: 1; }
-  .subtask-row.done { opacity: .5; }
-  .check-btn { flex-shrink: 0; background: none; border: none; cursor: pointer; padding: 0; display: flex; color: #CCC; transition: color .15s; }
-  .check-btn:hover { color: #C7552A; }
-  .check-btn.done { color: #5A9E6F; }
-  .subtask-text { font-size: 14px; color: #333; flex: 1; line-height: 1.45; }
-  .subtask-text.done { text-decoration: line-through; color: #BBB; }
-  .sub-delete { opacity: 0; background: none; border: none; cursor: pointer; padding: 4px; color: #CCC; display: flex; border-radius: 5px; transition: opacity .15s, color .15s, background .15s; flex-shrink: 0; }
-  .sub-delete:hover { color: #D94040; background: #FFF0F0; }
+  // Forms
+  const emptyForm = { title: '', priority: 'medium', dueDate: '', reminder: false, projectId: projects[0]?.id || '' };
+  const [form, setForm]               = useState(emptyForm);
+  const [projectForm, setProjectForm] = useState({ name: '', color: '#059669' });
 
-  /* ── Add subtask input ── */
-  .add-subtask-wrap { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; border: 1.5px dashed #E0DBD3; margin-top: 6px; transition: border-color .15s; }
-  .add-subtask-wrap:focus-within { border-color: #C7552A; border-style: solid; background: #FFFDFB; }
-  .add-subtask-icon { color: #CCC; display: flex; flex-shrink: 0; }
-  .add-subtask-wrap:focus-within .add-subtask-icon { color: #C7552A; }
-  .add-subtask-input { flex: 1; border: none; outline: none; font-size: 14px; color: #333; background: transparent; font-family: inherit; }
-  .add-subtask-input::placeholder { color: #CCC; }
-  .add-subtask-hint { font-size: 11.5px; color: #CCC; flex-shrink: 0; transition: color .15s; }
-  .add-subtask-wrap:focus-within .add-subtask-hint { color: #C7552A; }
-`;
+  useEffect(() => { saveData(STORAGE_TASKS, tasks); }, [tasks]);
+  useEffect(() => { saveData(STORAGE_PROJECTS, projects); }, [projects]);
 
-const StepByStepApp = () => {
-  const [showOnboarding, setShowOnboarding] = useState(true);
-  const [onboardingStep, setOnboardingStep] = useState(0);
-  const [tasks, setTasks] = useState([]);
-  const [activeView, setActiveView] = useState('dashboard');
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [showTaskCreation, setShowTaskCreation] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [toast, setToast] = useState(null);
+  const upd = (fn) => setTasks(p => { const n = fn(p); saveData(STORAGE_TASKS, n); return n; });
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2800); };
+  // ── TÂCHES ──
+  const openNew = () => { setForm({ ...emptyForm, projectId: projects[0]?.id || '' }); setShowNew(true); };
 
-  const onboardingSteps = [
-    { title: "Bienvenue sur Step by Step", description: "Transforme tes grands projets en petites victoires quotidiennes. Sans pression.", icon: "🌱" },
-    { title: "Avance à ton rythme", description: "Chaque tâche est découpée en micro-étapes concrètes et actionnables. Un pas à la fois.", icon: "🎯" },
-    { title: "Célèbre chaque progrès", description: "Chaque étape complétée compte. On avance ensemble, sans jugement.", icon: "✦" },
-  ];
-
-  const createTask = (formData) => {
-    const newTask = {
-      id: generateId(),
-      title: formData.title,
-      notes: formData.notes || '',
-      priority: formData.priority || '',
-      tags: formData.tags || [],
-      duration: formData.duration || '',
-      dueDate: formData.dueDate || '',
-      reminder: formData.reminder || '',
-      createdAt: new Date(),
-      subtasks: [],
-      progress: 0,
-    };
-    setTasks(prev => [newTask, ...prev]);
-    setSelectedTask(newTask);
-    setActiveView('task-detail');
-    showToast('Tâche créée — ajoute tes étapes !');
+  const createTask = () => {
+    if (!form.title.trim()) return;
+    const t = { id: generateId(), title: form.title.trim(), priority: form.priority, dueDate: form.dueDate || null, reminder: form.reminder, projectId: form.projectId, subtasks: [], createdAt: new Date().toISOString() };
+    if (t.reminder && t.dueDate) scheduleNotif(t);
+    upd(p => [t, ...p]);
+    setShowNew(false);
+    setSelectedId(t.id); setView('detail');
   };
 
-  const recalcProgress = (subtasks) => {
-    if (!subtasks.length) return 0;
-    return Math.round((subtasks.filter(s => s.completed).length / subtasks.length) * 100);
+  const saveEdit = () => {
+    if (!editingTask || !editingTask.title.trim()) return;
+    upd(p => p.map(t => t.id === editingTask.id ? { ...t, title: editingTask.title, priority: editingTask.priority, dueDate: editingTask.dueDate, projectId: editingTask.projectId, reminder: editingTask.reminder } : t));
+    setEditingTask(null);
   };
 
-  const updateTask = (taskId, updater) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? updater(t) : t));
-    setSelectedTask(prev => prev?.id === taskId ? updater(prev) : prev);
+  const delTask = (id) => { upd(p => p.filter(t => t.id !== id)); setView('tasks'); };
+  const getPct  = (t) => !t.subtasks.length ? 0 : Math.round(t.subtasks.filter(s => s.done).length / t.subtasks.length * 100);
+
+  const addSub    = (tid) => { if (!newSubtask.trim()) return; upd(p => p.map(t => t.id === tid ? { ...t, subtasks: [...t.subtasks, { id: generateId(), title: newSubtask.trim(), done: false }] } : t)); setNewSubtask(''); };
+  const toggleSub = (tid, sid) => upd(p => p.map(t => t.id === tid ? { ...t, subtasks: t.subtasks.map(s => s.id === sid ? { ...s, done: !s.done } : s) } : t));
+  const delSub    = (tid, sid) => upd(p => p.map(t => t.id === tid ? { ...t, subtasks: t.subtasks.filter(s => s.id !== sid) } : t));
+
+  const toggleReminder = async (tid) => {
+    if (Notification.permission !== 'granted') await Notification.requestPermission();
+    upd(p => p.map(t => { if (t.id !== tid) return t; const n = { ...t, reminder: !t.reminder }; if (n.reminder && n.dueDate) scheduleNotif(n); return n; }));
   };
 
-  const toggleSubtask = (taskId, subtaskId) => {
-    let wasCompleted = false;
-    updateTask(taskId, task => {
-      wasCompleted = !!task.subtasks.find(s => s.id === subtaskId)?.completed;
-      const subs = task.subtasks.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
-      return { ...task, subtasks: subs, progress: recalcProgress(subs) };
-    });
-    if (!wasCompleted) showToast('Étape validée — bien joué !');
+  // ── PROJETS ──
+  const createProject = () => {
+    if (!projectForm.name.trim()) return;
+    const p = { id: generateId(), name: projectForm.name.trim(), color: projectForm.color };
+    setProjects(prev => [...prev, p]);
+    setProjectForm({ name: '', color: '#059669' });
+    setShowNewProject(false);
   };
 
-  const addSubtask = (taskId, title) => {
-    if (!title.trim()) return;
-    updateTask(taskId, task => {
-      const subs = [...task.subtasks, { id: generateId(), title: title.trim(), completed: false, order: task.subtasks.length }];
-      return { ...task, subtasks: subs, progress: recalcProgress(subs) };
-    });
+  const deleteProject = (pid) => {
+    setProjects(prev => prev.filter(p => p.id !== pid));
+    upd(prev => prev.map(t => t.projectId === pid ? { ...t, projectId: '' } : t));
+    if (filterProject === pid) setFilterProject('tous');
+    setEditProjectId(null);
   };
 
-  const deleteSubtask = (taskId, subtaskId) => {
-    updateTask(taskId, task => {
-      const subs = task.subtasks.filter(s => s.id !== subtaskId);
-      return { ...task, subtasks: subs, progress: recalcProgress(subs) };
-    });
-  };
+  const getProject = (pid) => projects.find(p => p.id === pid);
 
-  const activeTask = tasks.find(t => t.progress < 100);
-  const nextSubtask = activeTask?.subtasks.find(s => !s.completed);
-  const stats = {
-    completedSubtasks: tasks.reduce((a, t) => a + t.subtasks.filter(s => s.completed).length, 0),
-    completedTasks: tasks.filter(t => t.progress === 100).length,
-    total: tasks.length,
-    overdue: tasks.filter(t => t.progress < 100 && isOverdue(t.dueDate)).length,
-  };
+  // ── DONNÉES FILTRÉES ──
+  const filtered = tasks.filter(t => {
+    const ms = t.title.toLowerCase().includes(search.toLowerCase());
+    const mp = filterProject === 'tous' || t.projectId === filterProject;
+    return ms && mp;
+  });
+  const pending  = tasks.filter(t => getPct(t) < 100);
+  const done     = tasks.filter(t => getPct(t) === 100);
+  const reminders = tasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
+  const selected = tasks.find(t => t.id === selectedId);
+  const today    = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  if (showOnboarding) {
-    const step = onboardingSteps[onboardingStep];
-    return (
-      <div className="ob-wrap">
-        <style>{CSS}</style>
-        <div className="ob-card">
-          <span className="ob-icon">{step.icon}</span>
-          <h1 className="ob-title">{step.title}</h1>
-          <p className="ob-desc">{step.description}</p>
-          <div className="ob-dots">
-            {onboardingSteps.map((_, i) => <div key={i} className={`ob-dot ${i === onboardingStep ? 'on' : 'off'}`} />)}
-          </div>
-          <div className="ob-row">
-            {onboardingStep > 0 && <button className="btn btn-outline" style={{flex:1,justifyContent:'center',padding:'11px'}} onClick={()=>setOnboardingStep(s=>s-1)}>Retour</button>}
-            <button className="btn btn-terra" style={{flex:1,justifyContent:'center',padding:'11px'}} onClick={()=>{ if(onboardingStep<2) setOnboardingStep(s=>s+1); else setShowOnboarding(false); }}>
-              {onboardingStep < 2 ? 'Suivant' : 'Commencer'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // ── CSS ──
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    .sbs { background: #F8FAF9; min-height: 100vh; color: #111827; font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; }
+
+    .sbs-header { background: #fff; border-bottom: 0.5px solid #E5E7EB; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
+    .sbs-logo { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: ${EM_DARK}; }
+    .sbs-logo-icon { width: 28px; height: 28px; border-radius: 8px; background: ${EM}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .sbs-icon-btn { width: 34px; height: 34px; border-radius: 8px; border: 0.5px solid #E5E7EB; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6B7280; }
+    .sbs-icon-btn:hover { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; }
+
+    .sbs-body { display: grid; grid-template-columns: 224px 1fr; min-height: calc(100vh - 56px); }
+
+    .sbs-sidebar { background: #fff; border-right: 0.5px solid #E5E7EB; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; }
+    .sbs-sl { font-size: 10px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 10px; margin: 14px 0 5px; }
+    .sbs-nav { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; color: #6B7280; border: none; background: none; width: 100%; text-align: left; font-family: inherit; }
+    .sbs-nav:hover { background: #F9FAFB; color: #111827; }
+    .sbs-nav.active { background: ${EM_LIGHT}; color: ${EM_DARK}; font-weight: 500; }
+    .sbs-badge { margin-left: auto; border-radius: 20px; font-size: 10px; padding: 1px 6px; font-weight: 600; background: ${EM}; color: #fff; }
+    .sbs-badge.amber { background: ${AMBER}; }
+
+    .sbs-proj-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #6B7280; }
+    .sbs-proj-row:hover { background: #F9FAFB; }
+    .sbs-proj-row.active { background: ${EM_LIGHT}; color: ${EM_DARK}; }
+    .sbs-proj-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .sbs-proj-edit { margin-left: auto; opacity: 0; background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 2px; display: flex; }
+    .sbs-proj-row:hover .sbs-proj-edit { opacity: 1; }
+
+    .sbs-content { padding: 24px; }
+    .sbs-ch { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+    .sbs-pt { font-size: 20px; font-weight: 600; color: #111827; }
+    .sbs-ps { font-size: 13px; color: #9CA3AF; margin-top: 3px; }
+
+    .btn-p { background: ${EM}; color: #fff; border: none; border-radius: 8px; padding: 9px 15px; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
+    .btn-p:hover { background: ${EM_DARK}; }
+    .btn-p:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-s { background: #fff; color: #374151; border: 0.5px solid #D1D5DB; border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
+    .btn-s:hover { border-color: #9CA3AF; }
+    .btn-danger { background: #fff; color: #EF4444; border: 0.5px solid #FECACA; border-radius: 7px; padding: 5px 9px; cursor: pointer; display: flex; align-items: center; font-family: inherit; }
+
+    .sbs-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 20px; }
+    .sbs-stat { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; }
+    .sbs-sv { font-size: 24px; font-weight: 600; color: #111827; }
+    .sbs-sv.g { color: ${EM}; }
+    .sbs-sl2 { font-size: 12px; color: #6B7280; margin-top: 2px; }
+    .sbs-ssub { font-size: 11px; color: #9CA3AF; margin-top: 1px; }
+
+    .sbs-banner { background: ${EM_LIGHT}; border: 0.5px solid ${EM_MID}; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 13px; color: ${EM_DARK}; }
+
+    .sec-label { font-size: 10.5px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+    .task-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
+    .task-card { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 13px 16px; cursor: pointer; transition: border-color 0.15s; }
+    .task-card:hover { border-color: ${EM_MID}; }
+    .task-card.done { opacity: 0.55; }
+    .task-top { display: flex; align-items: center; gap: 10px; }
+    .task-ck { width: 19px; height: 19px; min-width: 19px; border-radius: 50%; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .task-ck.done { background: ${EM}; border-color: ${EM}; }
+    .task-title { flex: 1; font-size: 14px; font-weight: 500; color: #111827; }
+    .task-card.done .task-title { text-decoration: line-through; color: #9CA3AF; }
+    .task-meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-left: 29px; }
+    .sbs-tag { font-size: 10.5px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+    .sbs-date { font-size: 11.5px; color: #9CA3AF; display: flex; align-items: center; gap: 3px; }
+    .sbs-date.alert { color: #B45309; }
+    .notif-pill { font-size: 11px; background: ${EM_LIGHT}; color: ${EM_DARK}; padding: 2px 7px; border-radius: 20px; display: flex; align-items: center; gap: 3px; }
+    .prog { height: 3px; background: #F3F4F6; border-radius: 2px; margin-top: 10px; margin-left: 29px; overflow: hidden; }
+    .prog-fill { height: 100%; background: ${EM}; border-radius: 2px; transition: width 0.3s; }
+
+    .add-btn { border: 1.5px dashed #E5E7EB; border-radius: 10px; padding: 11px 16px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: #9CA3AF; font-size: 13.5px; font-family: inherit; background: none; width: 100%; margin-top: 4px; }
+    .add-btn:hover { border-color: ${EM_MID}; color: ${EM}; background: ${EM_LIGHT}; }
+
+    .sub-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 0.5px solid #F9FAFB; }
+    .cb { width: 20px; height: 20px; min-width: 20px; border-radius: 6px; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+    .cb.done { background: ${EM}; border-color: ${EM}; }
+    .sub-t { flex: 1; font-size: 13.5px; color: #374151; }
+    .sub-t.done { text-decoration: line-through; color: #9CA3AF; }
+    .del-btn { background: none; border: none; cursor: pointer; color: #D1D5DB; padding: 2px; display: flex; }
+    .del-btn:hover { color: #EF4444; }
+
+    .sbs-search-w { position: relative; margin-bottom: 14px; }
+    .sbs-search { width: 100%; padding: 8px 12px 8px 36px; border: 0.5px solid #E5E7EB; border-radius: 8px; font-size: 13.5px; outline: none; font-family: inherit; background: #fff; }
+    .sbs-search:focus { border-color: ${EM_MID}; }
+    .si { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #9CA3AF; pointer-events: none; }
+
+    .filters { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-btn { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-family: inherit; cursor: pointer; border: 0.5px solid #E5E7EB; background: #fff; color: #6B7280; }
+    .filter-btn.active { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; font-weight: 500; }
+
+    .sbs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.38); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+    .sbs-modal { background: #fff; border-radius: 14px; padding: 24px; width: 100%; max-width: 450px; }
+    .modal-sm { max-width: 360px; }
+    .field-label { font-size: 11px; font-weight: 500; color: #6B7280; text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 5px; }
+    .sbs-input { width: 100%; padding: 8px 11px; border: 0.5px solid #D1D5DB; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
+    .sbs-input:focus { border-color: ${EM}; }
+    .sbs-select { width: 100%; padding: 8px 11px; border: 0.5px solid #D1D5DB; border-radius: 8px; font-size: 13.5px; font-family: inherit; background: #fff; outline: none; }
+    .toggle-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F9FAFB; border-radius: 8px; cursor: pointer; }
+    .toggle { width: 36px; height: 20px; border-radius: 10px; position: relative; flex-shrink: 0; }
+    .toggle-th { width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; }
+
+    .color-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+    .color-dot { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; border: 2px solid transparent; }
+    .color-dot.selected { border-color: #111827; }
+
+    .reminder-btn { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 5px 10px; border-radius: 7px; border: 0.5px solid #E5E7EB; cursor: pointer; background: #fff; font-family: inherit; color: #6B7280; }
+    .reminder-btn.on { background: ${EM_LIGHT}; color: ${EM_DARK}; border-color: ${EM_MID}; }
+
+    .proj-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .proj-mgmt-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F9FAFB; border-radius: 8px; }
+    .proj-mgmt-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    .empty { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 40px 20px; text-align: center; color: #9CA3AF; }
+    .empty a { color: ${EM}; cursor: pointer; font-weight: 500; }
+  `;
 
   return (
-    <div style={{minHeight:'100vh',background:'#FAF8F5',fontFamily:'Inter,system-ui,sans-serif',color:'#1a1a1a'}}>
-      <style>{CSS}</style>
+    <div className="sbs">
+      <style>{css}</style>
 
-      {toast && <div className="toast"><Check size={14} color="#5A9E6F"/>{toast}</div>}
-
-      <header className="app-header">
-        <div className="app-header-inner">
-          <span className="app-logo">Step <em>by</em> Step</span>
-          <button className="btn-icon" onClick={()=>setShowSettings(true)}><Settings size={17}/></button>
+      {/* HEADER */}
+      <header className="sbs-header">
+        <div className="sbs-logo">
+          <div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div>
+          Step by Step
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="sbs-icon-btn"><Search size={16} /></button>
+          <button className="sbs-icon-btn"><Bell size={16} /></button>
+          <button className="sbs-icon-btn"><Settings size={16} /></button>
         </div>
       </header>
 
-      <div className="app-nav-bar">
-        <div className="app-nav-inner">
-          {[
-            {id:'dashboard',label:'Tableau de bord',icon:<LayoutDashboard size={14}/>},
-            {id:'tasks',label:'Mes tâches',icon:<ListTodo size={14}/>},
-            {id:'progress',label:'Progression',icon:<BarChart2 size={14}/>},
-          ].map(t=>(
-            <button key={t.id} className={`nav-tab${activeView===t.id||(activeView==='task-detail'&&t.id==='tasks')?' active':''}`} onClick={()=>setActiveView(t.id)}>
-              {t.icon}{t.label}
+      <div className="sbs-body">
+        {/* SIDEBAR */}
+        <nav className="sbs-sidebar">
+          <div className="sbs-sl" style={{ marginTop: 0 }}>Navigation</div>
+          <button className={`sbs-nav ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+            <LayoutDashboard size={16} /> Aujourd'hui
+            {pending.length > 0 && <span className="sbs-badge">{pending.length}</span>}
+          </button>
+          <button className={`sbs-nav ${view === 'tasks' || view === 'detail' ? 'active' : ''}`} onClick={() => setView('tasks')}>
+            <ListChecks size={16} /> Toutes les tâches
+          </button>
+          <button className={`sbs-nav ${view === 'progress' ? 'active' : ''}`} onClick={() => setView('progress')}>
+            <TrendingUp size={16} /> Progression
+          </button>
+          {reminders.length > 0 && (
+            <button className="sbs-nav" onClick={() => setView('tasks')}>
+              <Bell size={16} /> Rappels <span className="sbs-badge amber">{reminders.length}</span>
             </button>
+          )}
+
+          <div className="sbs-sl">Projets</div>
+          <div className={`sbs-proj-row ${filterProject === 'tous' ? 'active' : ''}`} onClick={() => { setFilterProject('tous'); setView('tasks'); }}>
+            <Folder size={14} /> Tous les projets
+          </div>
+          {projects.map(p => (
+            <div key={p.id} className={`sbs-proj-row ${filterProject === p.id ? 'active' : ''}`}
+              onClick={() => { setFilterProject(p.id); setView('tasks'); }}>
+              <div className="sbs-proj-dot" style={{ background: p.color }} />
+              <span style={{ flex: 1 }}>{p.name}</span>
+              <button className="sbs-proj-edit" onClick={e => { e.stopPropagation(); setEditProjectId(p.id); }}><Edit2 size={12} /></button>
+            </div>
           ))}
-        </div>
-      </div>
+          <button className="sbs-nav" style={{ color: EM, marginTop: 2 }} onClick={() => setShowNewProject(true)}>
+            <Plus size={15} /> Nouveau projet
+          </button>
 
-      <main className="main-wrap">
+          <div style={{ marginTop: 'auto' }}>
+            <button className="sbs-nav" onClick={openNew}><Plus size={16} /> Nouvelle tâche</button>
+          </div>
+        </nav>
 
-        {activeView === 'dashboard' && (
-          <>
-            {stats.overdue > 0 && (
-              <div className="overdue-alert">
-                <Calendar size={15}/>
-                {stats.overdue} tâche{stats.overdue>1?'s':''} en retard — pense à les traiter en priorité.
+        {/* CONTENT */}
+        <main className="sbs-content">
+
+          {/* ── DASHBOARD ── */}
+          {view === 'dashboard' && <>
+            <div className="sbs-ch">
+              <div>
+                <div className="sbs-pt">Aujourd'hui</div>
+                <div className="sbs-ps" style={{ textTransform: 'capitalize' }}>{today} · {pending.length} tâche{pending.length !== 1 ? 's' : ''} restante{pending.length !== 1 ? 's' : ''}</div>
               </div>
+              <button className="btn-p" onClick={openNew}><Plus size={15} /> Nouvelle tâche</button>
+            </div>
+
+            {reminders.length > 0 && (
+              <div className="sbs-banner"><Bell size={16} color={EM} /><span><strong style={{ fontWeight: 600 }}>{reminders.length} rappel{reminders.length > 1 ? 's' : ''} actif{reminders.length > 1 ? 's' : ''}</strong> — {reminders[0].title}</span></div>
             )}
-            {activeTask && nextSubtask ? (
-              <>
-                <div className="section-lbl">Prochaine étape</div>
-                <div className="focus-panel">
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'3px'}}>
-                    <span className="focus-eyebrow">En cours</span>
-                    {activeTask.priority && (
-                      <span style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'12px',color:PRIORITY_CONFIG[activeTask.priority]?.color}}>
-                        <span className="priority-dot" style={{background:PRIORITY_CONFIG[activeTask.priority]?.dot}}/>
-                        {PRIORITY_CONFIG[activeTask.priority]?.label}
-                      </span>
+
+            <div className="sbs-stats">
+              <div className="sbs-stat"><div className="sbs-sv g">{done.length}</div><div className="sbs-sl2">Terminées</div><div className="sbs-ssub">sur {tasks.length}</div></div>
+              <div className="sbs-stat"><div className="sbs-sv">{pending.length}</div><div className="sbs-sl2">En cours</div><div className="sbs-ssub">{reminders.length} avec rappel</div></div>
+              <div className="sbs-stat"><div className="sbs-sv g">{tasks.length ? Math.round(done.length / tasks.length * 100) : 0}%</div><div className="sbs-sl2">Complétion</div></div>
+            </div>
+
+            {tasks.length === 0 ? (
+              <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche pour le moment.</p><a onClick={openNew}>Créer une tâche →</a></div>
+            ) : <>
+              {pending.length > 0 && <>
+                <div className="sec-label">En cours</div>
+                <div className="task-list">
+                  {pending.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}
+                </div>
+              </>}
+              {done.length > 0 && <>
+                <div className="sec-label">Terminées</div>
+                <div className="task-list">
+                  {done.map(t => (
+                    <div key={t.id} className="task-card done" onClick={() => { setSelectedId(t.id); setView('detail'); }}>
+                      <div className="task-top"><div className="task-ck done"><Check size={11} color="#fff" /></div><div className="task-title">{t.title}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </>}
+            </>}
+            <button className="add-btn" onClick={openNew}><Plus size={16} /> Ajouter une tâche...</button>
+          </>}
+
+          {/* ── TÂCHES ── */}
+          {view === 'tasks' && <>
+            <div className="sbs-ch">
+              <div>
+                <div className="sbs-pt">{filterProject === 'tous' ? 'Toutes les tâches' : getProject(filterProject)?.name || 'Tâches'}</div>
+                <div className="sbs-ps">{filtered.length} tâche{filtered.length !== 1 ? 's' : ''}</div>
+              </div>
+              <button className="btn-p" onClick={openNew}><Plus size={15} /> Nouvelle tâche</button>
+            </div>
+            <div className="sbs-search-w"><Search size={15} className="si" /><input className="sbs-search" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} /></div>
+            <div className="filters">
+              <button className={`filter-btn ${filterProject === 'tous' ? 'active' : ''}`} onClick={() => setFilterProject('tous')}>Tous</button>
+              {projects.map(p => (
+                <button key={p.id} className={`filter-btn ${filterProject === p.id ? 'active' : ''}`} onClick={() => setFilterProject(p.id)} style={{ borderColor: filterProject === p.id ? p.color : undefined, background: filterProject === p.id ? p.color + '22' : undefined, color: filterProject === p.id ? p.color : undefined }}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            {filtered.length === 0
+              ? <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche.</p><a onClick={openNew}>En créer une →</a></div>
+              : <div className="task-list">{filtered.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}</div>
+            }
+          </>}
+
+          {/* ── DETAIL ── */}
+          {view === 'detail' && selected && (() => {
+            const pct = getPct(selected); const pri = PRIORITY[selected.priority]; const due = formatDue(selected.dueDate); const proj = getProject(selected.projectId);
+            const isEditing = !!editingTask;
+            return <>
+              <button className="btn-s" style={{ marginBottom: 20 }} onClick={() => { setView('tasks'); setEditingTask(null); }}><ChevronLeft size={15} /> Retour</button>
+              <div style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 12, padding: '20px 22px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ flex: 1, marginRight: 12 }}>
+                    {isEditing ? (
+                      <input className="sbs-input" style={{ fontSize: 17, fontWeight: 600, marginBottom: 10 }}
+                        value={editingTask.title} onChange={e => setEditingTask(t => ({ ...t, title: e.target.value }))} autoFocus />
+                    ) : (
+                      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 8px' }}>{selected.title}</h2>
+                    )}
+                    {isEditing ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                        <select className="sbs-select" value={editingTask.priority} onChange={e => setEditingTask(t => ({ ...t, priority: e.target.value }))}>
+                          <option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option>
+                        </select>
+                        <select className="sbs-select" value={editingTask.projectId} onChange={e => setEditingTask(t => ({ ...t, projectId: e.target.value }))}>
+                          <option value="">Sans projet</option>
+                          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <input type="datetime-local" className="sbs-input" value={editingTask.dueDate || ''} onChange={e => setEditingTask(t => ({ ...t, dueDate: e.target.value }))} style={{ gridColumn: '1/-1' }} />
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span className="sbs-tag" style={{ background: pri.bg, color: pri.color, border: `0.5px solid ${pri.border}` }}>{pri.label}</span>
+                        {proj && <span className="sbs-date"><div style={{ width: 7, height: 7, borderRadius: '50%', background: proj.color }} />{proj.name}</span>}
+                        {due && <span className={`sbs-date${due.alert ? ' alert' : ''}`}><Clock size={11} />{due.label}</span>}
+                      </div>
                     )}
                   </div>
-                  <div className="focus-title">{activeTask.title}</div>
-                  <div className="focus-next">
-                    <button className="check-btn" onClick={()=>toggleSubtask(activeTask.id,nextSubtask.id)}><Circle size={17}/></button>
-                    <span style={{fontSize:'14px',color:'#333',lineHeight:1.5}}>{nextSubtask.title}</span>
-                  </div>
-                  <div className="progress-track"><div className={`progress-fill${activeTask.progress===100?' green':''}`} style={{width:`${activeTask.progress}%`}}/></div>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:'10px'}}>
-                    <span style={{fontSize:'12.5px',color:'#AAA'}}>{activeTask.subtasks.filter(s=>s.completed).length}/{activeTask.subtasks.length} étapes · {activeTask.progress}%</span>
-                    <button className="focus-link" onClick={()=>{setSelectedTask(activeTask);setActiveView('task-detail');}}>Voir tout <ChevronRight size={13}/></button>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    {isEditing ? (
+                      <>
+                        <button className="btn-p" style={{ padding: '5px 10px', fontSize: 13 }} onClick={saveEdit}><Save size={13} /> Enregistrer</button>
+                        <button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask(null)}><X size={14} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <button className={`reminder-btn${selected.reminder ? ' on' : ''}`} onClick={() => toggleReminder(selected.id)}>
+                          {selected.reminder ? <Bell size={13} /> : <BellOff size={13} />}
+                          {selected.reminder ? 'Rappel actif' : 'Rappel'}
+                        </button>
+                        <button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask({ ...selected })}><Edit2 size={14} /></button>
+                        <button className="btn-danger" onClick={() => delTask(selected.id)}><Trash2 size={14} /></button>
+                      </>
+                    )}
                   </div>
                 </div>
-              </>
-            ) : (
-              <button className="cta-btn" onClick={()=>setShowTaskCreation(true)}><Plus size={17}/>Créer ma première tâche</button>
-            )}
 
-            <div className="section-lbl">Vue d'ensemble</div>
-            <div className="stats-3">
-              {[{n:stats.completedSubtasks,l:'Étapes faites'},{n:stats.completedTasks,l:'Terminées'},{n:stats.total,l:'Au total'}].map((s,i)=>(
-                <div key={i} className="stat-box"><div className="stat-num">{s.n}</div><div className="stat-lbl">{s.l}</div></div>
-              ))}
-            </div>
+                {selected.subtasks.length > 0 && <>
+                  <div style={{ height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: EM, borderRadius: 3, transition: 'width 0.3s' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9CA3AF', marginBottom: 16 }}>
+                    <span>{selected.subtasks.filter(s => s.done).length}/{selected.subtasks.length} étapes</span>
+                    <span style={{ color: pct === 100 ? EM : '#9CA3AF', fontWeight: pct === 100 ? 600 : 400 }}>{pct}%{pct === 100 ? ' — Terminé !' : ''}</span>
+                  </div>
+                </>}
 
-            {tasks.length > 0 && (
-              <>
-                <div className="section-lbl">Toutes les tâches</div>
-                {tasks.map(task=>(
-                  <TaskCard key={task.id} task={task} onClick={()=>{setSelectedTask(task);setActiveView('task-detail');}}/>
+                <div className="sec-label" style={{ marginBottom: 6 }}>Sous-tâches</div>
+                {selected.subtasks.map(sub => (
+                  <div key={sub.id} className="sub-row">
+                    <div className={`cb${sub.done ? ' done' : ''}`} onClick={() => toggleSub(selected.id, sub.id)}>{sub.done && <Check size={12} color="#fff" />}</div>
+                    <span className={`sub-t${sub.done ? ' done' : ''}`}>{sub.title}</span>
+                    <button className="del-btn" onClick={() => delSub(selected.id, sub.id)}><X size={14} /></button>
+                  </div>
                 ))}
-              </>
-            )}
-          </>
-        )}
-
-        {activeView === 'tasks' && (
-          <>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'18px'}}>
-              <h2 style={{fontSize:'17px',fontWeight:'600'}}>Mes tâches</h2>
-              <button className="btn btn-terra" onClick={()=>setShowTaskCreation(true)}><Plus size={14}/>Nouvelle tâche</button>
-            </div>
-            {tasks.length === 0 ? (
-              <div className="card"><div className="empty-state">
-                <div className="empty-icon">🌱</div>
-                <div className="empty-title">Aucune tâche pour le moment</div>
-                <div className="empty-desc">Crée ta première tâche et commence à avancer.</div>
-                <button className="btn btn-terra" onClick={()=>setShowTaskCreation(true)}><Plus size={14}/>Créer une tâche</button>
-              </div></div>
-            ) : tasks.map(task=>(
-              <TaskCard key={task.id} task={task} onClick={()=>{setSelectedTask(task);setActiveView('task-detail');}}/>
-            ))}
-          </>
-        )}
-
-        {activeView === 'task-detail' && selectedTask && (
-          <>
-            <button className="back-btn" onClick={()=>setActiveView('tasks')}><ChevronLeft size={15}/>Mes tâches</button>
-
-            <div className="card" style={{marginBottom:'10px'}}>
-              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'10px',marginBottom:'5px'}}>
-                <h2 style={{fontSize:'17px',fontWeight:'600',lineHeight:1.3}}>{selectedTask.title}</h2>
-                {selectedTask.progress===100&&<span className="badge badge-green"><Check size={10}/>Terminé</span>}
-              </div>
-              <div style={{fontSize:'13px',color:'#AAA',marginBottom:'14px'}}>
-                {selectedTask.subtasks.length === 0
-                  ? 'Aucune étape — ajoutes-en ci-dessous'
-                  : `${selectedTask.subtasks.filter(s=>s.completed).length}/${selectedTask.subtasks.length} étapes · ${selectedTask.progress}%`
-                }
-              </div>
-              {selectedTask.subtasks.length > 0 && (
-                <div className="progress-track" style={{height:'5px'}}>
-                  <div className={`progress-fill${selectedTask.progress===100?' green':''}`} style={{width:`${selectedTask.progress}%`}}/>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <input className="sbs-input" placeholder="Ajouter une étape..." value={newSubtask}
+                    onChange={e => setNewSubtask(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSub(selected.id)} />
+                  <button className="btn-p" onClick={() => addSub(selected.id)} style={{ padding: '8px 12px' }}><Plus size={15} /></button>
                 </div>
-              )}
-            </div>
+              </div>
+            </>;
+          })()}
 
-            {(selectedTask.priority || selectedTask.dueDate || selectedTask.duration || selectedTask.tags?.length > 0) && (
-              <div className="detail-meta-card">
-                {selectedTask.priority && (
-                  <div className="detail-meta-item">
-                    <span className="detail-meta-key">Priorité</span>
-                    <span className="detail-meta-val"><span className="priority-dot" style={{background:PRIORITY_CONFIG[selectedTask.priority]?.dot}}/>{PRIORITY_CONFIG[selectedTask.priority]?.label}</span>
+          {/* ── PROGRESSION ── */}
+          {view === 'progress' && <>
+            <div className="sbs-ch"><div><div className="sbs-pt">Progression</div><div className="sbs-ps">Vue globale</div></div></div>
+            <div className="sbs-stats">
+              <div className="sbs-stat"><div className="sbs-sv g">{done.length}</div><div className="sbs-sl2">Terminées</div></div>
+              <div className="sbs-stat"><div className="sbs-sv">{tasks.filter(t => { const p = getPct(t); return p > 0 && p < 100; }).length}</div><div className="sbs-sl2">En cours</div></div>
+              <div className="sbs-stat"><div className="sbs-sv">{tasks.reduce((a, t) => a + t.subtasks.filter(s => s.done).length, 0)}</div><div className="sbs-sl2">Étapes faites</div></div>
+            </div>
+            {projects.map(proj => {
+              const ptasks = tasks.filter(t => t.projectId === proj.id);
+              if (!ptasks.length) return null;
+              const pdone = ptasks.filter(t => getPct(t) === 100).length;
+              return (
+                <div key={proj.id} style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <div style={{ width: 9, height: 9, borderRadius: '50%', background: proj.color }} />
+                    <span style={{ fontWeight: 500, fontSize: 14 }}>{proj.name}</span>
+                    <span style={{ fontSize: 12, color: '#9CA3AF', marginLeft: 'auto' }}>{pdone}/{ptasks.length}</span>
                   </div>
-                )}
-                {selectedTask.dueDate && (
-                  <div className="detail-meta-item">
-                    <span className="detail-meta-key">Échéance</span>
-                    <span className="detail-meta-val" style={{color:isOverdue(selectedTask.dueDate)?'#D94040':'#333'}}>{formatDate(selectedTask.dueDate)}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {ptasks.map(t => {
+                      const pct = getPct(t);
+                      return (
+                        <div key={t.id} style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 9, padding: '10px 14px', cursor: 'pointer' }} onClick={() => { setSelectedId(t.id); setView('detail'); }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <span style={{ fontSize: 13.5, fontWeight: 500 }}>{t.title}</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? EM : '#9CA3AF' }}>{pct}%</span>
+                          </div>
+                          <div style={{ height: 3, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${pct}%`, background: proj.color, borderRadius: 2 }} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-                {selectedTask.duration && (
-                  <div className="detail-meta-item">
-                    <span className="detail-meta-key">Durée</span>
-                    <span className="detail-meta-val">{selectedTask.duration}</span>
-                  </div>
-                )}
-                {selectedTask.reminder && (
-                  <div className="detail-meta-item">
-                    <span className="detail-meta-key">Rappel</span>
-                    <span className="detail-meta-val">{selectedTask.reminder}</span>
-                  </div>
-                )}
-                {selectedTask.tags?.length > 0 && (
-                  <div className="detail-meta-item" style={{gridColumn:'1/-1'}}>
-                    <span className="detail-meta-key">Tags</span>
-                    <div style={{display:'flex',flexWrap:'wrap',gap:'5px',marginTop:'3px'}}>
-                      {selectedTask.tags.map(t=><span key={t} className="badge badge-gray">{t}</span>)}
-                    </div>
-                  </div>
-                )}
+                </div>
+              );
+            })}
+            {tasks.filter(t => !t.projectId).length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, color: '#9CA3AF', marginBottom: 8 }}>Sans projet</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {tasks.filter(t => !t.projectId).map(t => {
+                    const pct = getPct(t);
+                    return (
+                      <div key={t.id} style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 9, padding: '10px 14px', cursor: 'pointer' }} onClick={() => { setSelectedId(t.id); setView('detail'); }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}><span style={{ fontSize: 13.5, fontWeight: 500 }}>{t.title}</span><span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? EM : '#9CA3AF' }}>{pct}%</span></div>
+                        <div style={{ height: 3, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}><div style={{ height: '100%', width: `${pct}%`, background: EM, borderRadius: 2 }} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
+          </>}
 
-            {selectedTask.notes && (
-              <div className="card" style={{marginBottom:'10px',fontSize:'14px',color:'#555',lineHeight:1.6}}>
-                <div style={{fontSize:'11px',fontWeight:600,color:'#BBB',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:'7px'}}>Notes</div>
-                {selectedTask.notes}
+        </main>
+      </div>
+
+      {/* ── MODAL NOUVELLE TÂCHE ── */}
+      {showNew && (
+        <div className="sbs-overlay" onClick={() => setShowNew(false)}>
+          <div className="sbs-modal" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <span style={{ fontSize: 17, fontWeight: 600 }}>Nouvelle tâche</span>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setShowNew(false)}><X size={18} /></button>
+            </div>
+            <div style={{ marginBottom: 13 }}>
+              <label className="field-label">Titre</label>
+              <input className="sbs-input" placeholder="Titre..." value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createTask()} autoFocus />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
+              <div>
+                <label className="field-label">Priorité</label>
+                <select className="sbs-select" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
+                  <option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option>
+                </select>
               </div>
-            )}
-
-            {/* Étapes */}
-            <div className="card">
-              <div style={{fontSize:'11px',fontWeight:'600',color:'#BBB',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:'8px'}}>
-                Étapes {selectedTask.subtasks.length > 0 && <span style={{color:'#DDD',fontWeight:400}}>· {selectedTask.subtasks.length}</span>}
+              <div>
+                <label className="field-label">Projet</label>
+                <select className="sbs-select" value={form.projectId} onChange={e => setForm(f => ({ ...f, projectId: e.target.value }))}>
+                  <option value="">Sans projet</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
-
-              {selectedTask.subtasks.length === 0 && (
-                <p style={{fontSize:'13.5px',color:'#CCC',padding:'8px 10px 12px',textAlign:'center'}}>
-                  Aucune étape pour l'instant — ajoutes-en une ci-dessous.
-                </p>
-              )}
-
-              {selectedTask.subtasks.map(sub => (
-                <div key={sub.id} className={`subtask-row${sub.completed?' done':''}`}>
-                  <button className={`check-btn${sub.completed?' done':''}`} onClick={()=>toggleSubtask(selectedTask.id,sub.id)}>
-                    {sub.completed?<CheckCircle size={17}/>:<Circle size={17}/>}
-                  </button>
-                  <span className={`subtask-text${sub.completed?' done':''}`}>{sub.title}</span>
-                  <button className="sub-delete" onClick={()=>deleteSubtask(selectedTask.id,sub.id)} title="Supprimer">
-                    <Trash2 size={14}/>
-                  </button>
-                </div>
-              ))}
-
-              {/* Input ajout étape */}
-              <AddSubtaskInput onAdd={(title) => addSubtask(selectedTask.id, title)} />
             </div>
-          </>
-        )}
-
-        {activeView === 'progress' && (
-          <>
-            <h2 style={{fontSize:'17px',fontWeight:'600',marginBottom:'18px'}}>Progression</h2>
-            <div className="card" style={{textAlign:'center',padding:'28px 20px',marginBottom:'10px'}}>
-              <div style={{fontSize:'44px',fontWeight:'600',color:'#1a1a1a',letterSpacing:'-1px',lineHeight:1}}>{stats.completedSubtasks}</div>
-              <div style={{fontSize:'13px',color:'#AAA',marginTop:'5px'}}>étapes accomplies au total</div>
+            <div style={{ marginBottom: 13 }}>
+              <label className="field-label">Échéance</label>
+              <input type="datetime-local" className="sbs-input" value={form.dueDate} onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} />
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'10px'}}>
-              {[{l:'Terminées',n:stats.completedTasks},{l:'En cours',n:stats.total-stats.completedTasks}].map((s,i)=>(
-                <div key={i} className="stat-box" style={{textAlign:'left',padding:'16px'}}>
-                  <div style={{fontSize:'11px',color:'#CCC',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:'7px',fontWeight:600}}>{s.l}</div>
-                  <div className="stat-num">{s.n}</div>
-                </div>
-              ))}
+            <div className="toggle-row" style={{ marginBottom: 20 }} onClick={() => setForm(f => ({ ...f, reminder: !f.reminder }))}>
+              <div className="toggle" style={{ background: form.reminder ? EM : '#D1D5DB' }}>
+                <div className="toggle-th" style={{ left: form.reminder ? 18 : 2 }} />
+              </div>
+              <span style={{ fontSize: 13, color: '#374151' }}>Rappel 30 min avant</span>
             </div>
-            <div className="card">
-              <div style={{fontSize:'13.5px',fontWeight:'600',color:'#333',marginBottom:'10px'}}>Historique</div>
-              {tasks.filter(t=>t.progress===100).length===0
-                ? <p style={{fontSize:'13px',color:'#CCC',padding:'14px 0',textAlign:'center'}}>Aucune tâche complétée pour le moment.</p>
-                : tasks.filter(t=>t.progress===100).map(task=>(
-                  <div key={task.id} className="history-item">
-                    <div className="history-dot"><Check size={11} color="#3D7A52"/></div>
-                    <span style={{fontSize:'13.5px',color:'#333'}}>{task.title}</span>
-                  </div>
-                ))
-              }
-            </div>
-          </>
-        )}
-      </main>
-
-      {showTaskCreation && (
-        <TaskCreationWizard onClose={()=>setShowTaskCreation(false)} onCreate={createTask}/>
-      )}
-
-      {showSettings && (
-        <div className="modal-bg" onClick={()=>setShowSettings(false)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div className="modal-hdr">
-              <span className="modal-title">Paramètres</span>
-              <button className="btn-icon" onClick={()=>setShowSettings(false)}><X size={17}/></button>
-            </div>
-            <div className="settings-row"><h4>Notifications</h4><p>Rappels doux pour t'encourager (bientôt disponible)</p></div>
-            <div className="settings-row"><h4>Rythme</h4><p>Personnalise ton rythme d'avancement (bientôt disponible)</p></div>
-            <div className="settings-row"><h4>À propos</h4><p>Step by Step v1.0</p></div>
-            <button className="btn btn-outline" style={{width:'100%',justifyContent:'center',marginTop:'16px',padding:'11px'}}
-              onClick={()=>{if(confirm("Revoir l'introduction ?")){setShowOnboarding(true);setOnboardingStep(0);setShowSettings(false);}}}>
-              Revoir l'introduction
-            </button>
+            <button className="btn-p" style={{ width: '100%', justifyContent: 'center', padding: 11, fontSize: 14 }} onClick={createTask} disabled={!form.title.trim()}>Créer la tâche</button>
           </div>
         </div>
       )}
+
+      {/* ── MODAL NOUVEAU PROJET ── */}
+      {showNewProject && (
+        <div className="sbs-overlay" onClick={() => setShowNewProject(false)}>
+          <div className="sbs-modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <span style={{ fontSize: 17, fontWeight: 600 }}>Nouveau projet</span>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setShowNewProject(false)}><X size={18} /></button>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label className="field-label">Nom du projet</label>
+              <input className="sbs-input" placeholder="Ex : Freelance, Perso..." value={projectForm.name} onChange={e => setProjectForm(f => ({ ...f, name: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createProject()} autoFocus />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label className="field-label">Couleur</label>
+              <div className="color-picker">
+                {PROJECT_COLORS.map(c => (
+                  <div key={c} className={`color-dot ${projectForm.color === c ? 'selected' : ''}`} style={{ background: c }} onClick={() => setProjectForm(f => ({ ...f, color: c }))}>
+                    {projectForm.color === c && <Check size={13} color="#fff" />}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button className="btn-p" style={{ width: '100%', justifyContent: 'center', padding: 11 }} onClick={createProject} disabled={!projectForm.name.trim()}>Créer le projet</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL ÉDITION PROJET ── */}
+      {editProjectId && (() => {
+        const proj = projects.find(p => p.id === editProjectId);
+        if (!proj) return null;
+        return (
+          <div className="sbs-overlay" onClick={() => setEditProjectId(null)}>
+            <div className="sbs-modal modal-sm" onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <span style={{ fontSize: 17, fontWeight: 600 }}>Modifier le projet</span>
+                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setEditProjectId(null)}><X size={18} /></button>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label className="field-label">Nom</label>
+                <input className="sbs-input" value={proj.name}
+                  onChange={e => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, name: e.target.value } : p))} autoFocus />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label className="field-label">Couleur</label>
+                <div className="color-picker">
+                  {PROJECT_COLORS.map(c => (
+                    <div key={c} className={`color-dot ${proj.color === c ? 'selected' : ''}`} style={{ background: c }}
+                      onClick={() => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, color: c } : p))}>
+                      {proj.color === c && <Check size={13} color="#fff" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn-p" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditProjectId(null)}>Enregistrer</button>
+                <button className="btn-danger" onClick={() => deleteProject(editProjectId)}><Trash2 size={15} /></button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
-};
+}
 
-// Composant input ajout étape
-const AddSubtaskInput = ({ onAdd }) => {
-  const [value, setValue] = useState('');
-  const inputRef = useRef(null);
-
-  const handleAdd = () => {
-    if (!value.trim()) return;
-    onAdd(value);
-    setValue('');
-    inputRef.current?.focus();
-  };
-
+// Composant carte tâche réutilisable
+function TaskCard({ task, pct, proj, onClick }) {
+  const pri = PRIORITY[task.priority]; const due = formatDue(task.dueDate);
   return (
-    <div className="add-subtask-wrap">
-      <span className="add-subtask-icon"><Plus size={15}/></span>
-      <input
-        ref={inputRef}
-        className="add-subtask-input"
-        type="text"
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
-        placeholder="Ajouter une étape…"
-      />
-      {value.trim() && <span className="add-subtask-hint">↵ Entrée</span>}
+    <div className="task-card" onClick={onClick}>
+      <div className="task-top">
+        <div className="task-ck"><Circle size={9} color="#D1D5DB" /></div>
+        <div className="task-title">{task.title}</div>
+        <ChevronRight size={15} color="#D1D5DB" />
+      </div>
+      <div className="task-meta">
+        <span className="sbs-tag" style={{ background: pri.bg, color: pri.color, border: `0.5px solid ${pri.border}` }}>{pri.label}</span>
+        {proj && <span className="sbs-date"><div style={{ width: 6, height: 6, borderRadius: '50%', background: proj.color, display: 'inline-block' }} /> {proj.name}</span>}
+        {due && <span className={`sbs-date${due.alert ? ' alert' : ''}`}><Clock size={11} />{due.label}</span>}
+        {task.reminder && <span className="notif-pill"><Bell size={10} /> Rappel</span>}
+        {task.subtasks.length > 0 && <span className="sbs-date">{task.subtasks.filter(s => s.done).length}/{task.subtasks.length} étapes</span>}
+      </div>
+      {task.subtasks.length > 0 && <div className="prog"><div className="prog-fill" style={{ width: `${pct}%` }} /></div>}
     </div>
   );
-};
-
-// Carte tâche réutilisable
-const TaskCard = ({ task, onClick }) => (
-  <div className="card card-hover" onClick={onClick}>
-    <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'10px'}}>
-      <span style={{fontSize:'14.5px',fontWeight:'600',color:'#1a1a1a',lineHeight:1.3}}>{task.title}</span>
-      <div style={{display:'flex',alignItems:'center',gap:'5px',flexShrink:0}}>
-        {task.priority && <span className="priority-dot" style={{background:PRIORITY_CONFIG[task.priority]?.dot,marginTop:'2px'}}/>}
-        {task.progress===100?<span className="badge badge-green"><Check size={10}/>Terminé</span>:<span className="badge badge-warm">{task.progress}%</span>}
-      </div>
-    </div>
-    {task.subtasks.length > 0 && (
-      <div className="progress-track"><div className={`progress-fill${task.progress===100?' green':''}`} style={{width:`${task.progress}%`}}/></div>
-    )}
-    <div className="meta-row">
-      {task.dueDate && <span className="meta-pill" style={{color:isOverdue(task.dueDate)?'#D94040':'#AAA'}}><Calendar size={11}/>{formatDate(task.dueDate)}</span>}
-      {task.duration && <span className="meta-pill"><Clock size={11}/>{task.duration}</span>}
-      {task.tags?.slice(0,2).map(t=><span key={t} className="meta-pill"><Tag size={11}/>{t}</span>)}
-      {task.subtasks.length > 0 && <span className="meta-pill">{task.subtasks.filter(s=>s.completed).length}/{task.subtasks.length} étapes</span>}
-    </div>
-  </div>
-);
-
-export default StepByStepApp;
+}
