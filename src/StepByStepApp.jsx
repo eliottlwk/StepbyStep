@@ -2,25 +2,30 @@ import React, { useState, useEffect } from 'react';
 import {
   Check, Plus, ChevronLeft, ChevronRight, Bell, BellOff,
   Trash2, LayoutDashboard, ListChecks, TrendingUp, X, Clock,
-  Search, Settings, FolderOpen, Edit2, Folder, Circle, Save
+  Search, Settings, Edit2, Folder, Save, GripVertical
 } from 'lucide-react';
 import Onboarding from './Onboarding';
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_TASKS = 'sbs_tasks_v4';
+const STORAGE_TASKS    = 'sbs_tasks_v4';
 const STORAGE_PROJECTS = 'sbs_projects_v1';
-
 const loadData = (key, fallback) => { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback; } catch { return fallback; } };
-const saveData = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+const saveData = (key, val)      => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 
 const DEFAULT_PROJECTS = [
-  { id: 'p1', name: 'Personnel',    color: '#059669' },
-  { id: 'p2', name: 'École',        color: '#8B5CF6' },
-  { id: 'p3', name: 'Elevia Agency',color: '#2563EB' },
+  { id: 'p1', name: 'Personnel',     color: '#059669' },
+  { id: 'p2', name: 'École',         color: '#8B5CF6' },
+  { id: 'p3', name: 'Elevia Agency', color: '#2563EB' },
 ];
 
 const EM = '#059669'; const EM_LIGHT = '#D1FAE5'; const EM_DARK = '#065F46'; const EM_MID = '#6EE7B7';
-const AMBER = '#F59E0B';
 const PRIORITY = {
   high:   { label: 'Urgent', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
   medium: { label: 'Moyen',  bg: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
@@ -45,39 +50,86 @@ const scheduleNotif = (task) => {
   setTimeout(() => { if (Notification.permission === 'granted') new Notification('Step by Step', { body: `Rappel : ${task.title}` }); }, delay);
 };
 
+// ── Tâche sortable (dashboard/liste) ──
+function SortableTaskCard({ task, pct, proj, onToggleDone, onOpen }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, zIndex: isDragging ? 50 : 'auto' };
+  const pri = PRIORITY[task.priority]; const due = formatDue(task.dueDate);
+  const done = pct === 100;
+  return (
+    <div ref={setNodeRef} style={style} className={`task-card${done ? ' done' : ''}`}>
+      <div className="task-top">
+        {/* Poignée drag */}
+        <button className="drag-handle" {...attributes} {...listeners} tabIndex={-1} onClick={e => e.stopPropagation()}>
+          <GripVertical size={14} />
+        </button>
+        {/* Coche */}
+        <div className={`task-ck${done ? ' done' : ''}`}
+          onClick={e => { e.stopPropagation(); onToggleDone(task.id); }}
+          title={done ? 'Marquer en cours' : 'Marquer terminée'}>
+          {done && <Check size={11} color="#fff" />}
+        </div>
+        {/* Titre cliquable → détail */}
+        <div className="task-title" onClick={() => onOpen(task.id)} style={{ cursor: 'pointer' }}>{task.title}</div>
+        <ChevronRight size={15} color="#D1D5DB" onClick={() => onOpen(task.id)} style={{ cursor: 'pointer', flexShrink: 0 }} />
+      </div>
+      <div className="task-meta" onClick={() => onOpen(task.id)}>
+        <span className="sbs-tag" style={{ background: pri.bg, color: pri.color, border: `0.5px solid ${pri.border}` }}>{pri.label}</span>
+        {proj && <span className="sbs-date"><div style={{ width: 6, height: 6, borderRadius: '50%', background: proj.color, display: 'inline-block' }} /> {proj.name}</span>}
+        {due && <span className={`sbs-date${due.alert ? ' alert' : ''}`}><Clock size={11} />{due.label}</span>}
+        {task.reminder && <span className="notif-pill"><Bell size={10} /> Rappel</span>}
+        {task.subtasks.length > 0 && <span className="sbs-date">{task.subtasks.filter(s => s.done).length}/{task.subtasks.length} étapes</span>}
+      </div>
+      {task.subtasks.length > 0 && <div className="prog" onClick={() => onOpen(task.id)}><div className="prog-fill" style={{ width: `${pct}%` }} /></div>}
+    </div>
+  );
+}
+
+// ── Sous-tâche sortable ──
+function SortableSubtask({ sub, taskId, onToggle, onDelete }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: sub.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, background: isDragging ? '#F0FDF4' : 'transparent', borderRadius: 6 };
+  return (
+    <div ref={setNodeRef} style={style} className="sub-row">
+      <button className="drag-handle" {...attributes} {...listeners} tabIndex={-1}><GripVertical size={14} /></button>
+      <div className={`cb${sub.done ? ' done' : ''}`} onClick={() => onToggle(taskId, sub.id)}>{sub.done && <Check size={12} color="#fff" />}</div>
+      <span className={`sub-t${sub.done ? ' done' : ''}`}>{sub.title}</span>
+      <button className="del-btn" onClick={() => onDelete(taskId, sub.id)}><X size={14} /></button>
+    </div>
+  );
+}
+
 export default function StepByStepApp() {
   const [tasks, setTasks]       = useState(() => loadData(STORAGE_TASKS, []));
   const [projects, setProjects] = useState(() => loadData(STORAGE_PROJECTS, DEFAULT_PROJECTS));
   const [view, setView]         = useState('dashboard');
-  const [selectedId, setSelectedId]   = useState(null);
+  const [selectedId, setSelectedId]       = useState(null);
   const [filterProject, setFilterProject] = useState('tous');
   const [search, setSearch]     = useState('');
   const [newSubtask, setNewSubtask] = useState('');
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => !localStorage.getItem('sbs_onboarded')
-  );
-
-  // Modals
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('sbs_onboarded'));
   const [showNew, setShowNew]               = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
   const [editingTask, setEditingTask]       = useState(null);
   const [editProjectId, setEditProjectId]   = useState(null);
-
-  // Forms
   const emptyForm = { title: '', priority: 'medium', dueDate: '', reminder: false, projectId: projects[0]?.id || '' };
   const [form, setForm]               = useState(emptyForm);
   const [projectForm, setProjectForm] = useState({ name: '', color: '#059669' });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   useEffect(() => { saveData(STORAGE_TASKS, tasks); }, [tasks]);
   useEffect(() => { saveData(STORAGE_PROJECTS, projects); }, [projects]);
 
   const upd = (fn) => setTasks(p => { const n = fn(p); saveData(STORAGE_TASKS, n); return n; });
-
   const openNew = () => { setForm({ ...emptyForm, projectId: projects[0]?.id || '' }); setShowNew(true); };
 
   const createTask = () => {
     if (!form.title.trim()) return;
-    const t = { id: generateId(), title: form.title.trim(), priority: form.priority, dueDate: form.dueDate || null, reminder: form.reminder, projectId: form.projectId, subtasks: [], createdAt: new Date().toISOString() };
+    const t = { id: generateId(), title: form.title.trim(), priority: form.priority, dueDate: form.dueDate || null, reminder: form.reminder, projectId: form.projectId, subtasks: [], done: false, createdAt: new Date().toISOString() };
     if (t.reminder && t.dueDate) scheduleNotif(t);
     upd(p => [t, ...p]);
     setShowNew(false);
@@ -86,16 +138,54 @@ export default function StepByStepApp() {
 
   const saveEdit = () => {
     if (!editingTask || !editingTask.title.trim()) return;
-    upd(p => p.map(t => t.id === editingTask.id ? { ...t, title: editingTask.title, priority: editingTask.priority, dueDate: editingTask.dueDate, projectId: editingTask.projectId, reminder: editingTask.reminder } : t));
+    upd(p => p.map(t => t.id === editingTask.id ? { ...t, ...editingTask } : t));
     setEditingTask(null);
   };
 
-  const delTask = (id) => { upd(p => p.filter(t => t.id !== id)); setView('tasks'); };
-  const getPct  = (t) => !t.subtasks.length ? 0 : Math.round(t.subtasks.filter(s => s.done).length / t.subtasks.length * 100);
+  // Coche tâche : si sous-tâches → toutes done/undone, sinon flag done
+  const toggleTaskDone = (id) => {
+    upd(p => p.map(t => {
+      if (t.id !== id) return t;
+      if (t.subtasks.length > 0) {
+        const allDone = t.subtasks.every(s => s.done);
+        return { ...t, subtasks: t.subtasks.map(s => ({ ...s, done: !allDone })) };
+      }
+      return { ...t, done: !t.done };
+    }));
+  };
+
+  const delTask   = (id) => { upd(p => p.filter(t => t.id !== id)); setView('tasks'); };
+  const getPct    = (t)  => {
+    if (t.subtasks.length > 0) return Math.round(t.subtasks.filter(s => s.done).length / t.subtasks.length * 100);
+    return t.done ? 100 : 0;
+  };
 
   const addSub    = (tid) => { if (!newSubtask.trim()) return; upd(p => p.map(t => t.id === tid ? { ...t, subtasks: [...t.subtasks, { id: generateId(), title: newSubtask.trim(), done: false }] } : t)); setNewSubtask(''); };
   const toggleSub = (tid, sid) => upd(p => p.map(t => t.id === tid ? { ...t, subtasks: t.subtasks.map(s => s.id === sid ? { ...s, done: !s.done } : s) } : t));
   const delSub    = (tid, sid) => upd(p => p.map(t => t.id === tid ? { ...t, subtasks: t.subtasks.filter(s => s.id !== sid) } : t));
+
+  // Drag tâches
+  const handleTaskDragEnd = (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    upd(prev => {
+      const oldIndex = prev.findIndex(t => t.id === active.id);
+      const newIndex = prev.findIndex(t => t.id === over.id);
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  };
+
+  // Drag sous-tâches
+  const handleSubDragEnd = (taskId, event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    upd(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const oi = t.subtasks.findIndex(s => s.id === active.id);
+      const ni = t.subtasks.findIndex(s => s.id === over.id);
+      return { ...t, subtasks: arrayMove(t.subtasks, oi, ni) };
+    }));
+  };
 
   const toggleReminder = async (tid) => {
     if (Notification.permission !== 'granted') await Notification.requestPermission();
@@ -118,17 +208,12 @@ export default function StepByStepApp() {
   };
 
   const getProject = (pid) => projects.find(p => p.id === pid);
-
-  const filtered = tasks.filter(t => {
-    const ms = t.title.toLowerCase().includes(search.toLowerCase());
-    const mp = filterProject === 'tous' || t.projectId === filterProject;
-    return ms && mp;
-  });
-  const pending   = tasks.filter(t => getPct(t) < 100);
-  const done      = tasks.filter(t => getPct(t) === 100);
-  const reminders = tasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
-  const selected  = tasks.find(t => t.id === selectedId);
-  const today     = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const filtered   = tasks.filter(t => t.title.toLowerCase().includes(search.toLowerCase()) && (filterProject === 'tous' || t.projectId === filterProject));
+  const pending    = tasks.filter(t => getPct(t) < 100);
+  const done       = tasks.filter(t => getPct(t) === 100);
+  const reminders  = tasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
+  const selected   = tasks.find(t => t.id === selectedId);
+  const today      = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   const css = `
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
@@ -146,7 +231,7 @@ export default function StepByStepApp() {
     .sbs-nav:hover { background: #F9FAFB; color: #111827; }
     .sbs-nav.active { background: ${EM_LIGHT}; color: ${EM_DARK}; font-weight: 500; }
     .sbs-badge { margin-left: auto; border-radius: 20px; font-size: 10px; padding: 1px 6px; font-weight: 600; background: ${EM}; color: #fff; }
-    .sbs-badge.amber { background: ${AMBER}; }
+    .sbs-badge.amber { background: #F59E0B; }
     .sbs-proj-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #6B7280; }
     .sbs-proj-row:hover { background: #F9FAFB; }
     .sbs-proj-row.active { background: ${EM_LIGHT}; color: ${EM_DARK}; }
@@ -156,7 +241,7 @@ export default function StepByStepApp() {
     .sbs-content { padding: 24px; }
     .sbs-ch { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
     .sbs-pt { font-size: 20px; font-weight: 600; color: #111827; }
-    .sbs-ps { font-size: 13px; color: #9CA3AF; margin-top: 3px; }
+    .sbs-ps { font-size: 13px; color: #9CA3AF; margin-top: 3px; text-transform: capitalize; }
     .btn-p { background: ${EM}; color: #fff; border: none; border-radius: 8px; padding: 9px 15px; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
     .btn-p:hover { background: ${EM_DARK}; }
     .btn-p:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -169,23 +254,30 @@ export default function StepByStepApp() {
     .sbs-sv.g { color: ${EM}; }
     .sbs-sl2 { font-size: 12px; color: #6B7280; margin-top: 2px; }
     .sbs-ssub { font-size: 11px; color: #9CA3AF; margin-top: 1px; }
-    .sbs-banner { background: ${EM_LIGHT}; border: 0.5px solid ${EM_MID}; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 13px; color: ${EM_DARK}; }
+
+    /* Bannière rappel — amber */
+    .sbs-banner { background: #FFFBEB; border: 0.5px solid #FDE68A; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 13px; color: #92400E; }
+
     .sec-label { font-size: 10.5px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
     .task-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
-    .task-card { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 13px 16px; cursor: pointer; transition: border-color 0.15s; }
+    .task-card { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 13px 16px; transition: border-color 0.15s; }
     .task-card:hover { border-color: ${EM_MID}; }
     .task-card.done { opacity: 0.55; }
     .task-top { display: flex; align-items: center; gap: 10px; }
-    .task-ck { width: 19px; height: 19px; min-width: 19px; border-radius: 50%; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .drag-handle { background: none; border: none; cursor: grab; color: #D1D5DB; padding: 2px; display: flex; align-items: center; flex-shrink: 0; touch-action: none; }
+    .drag-handle:hover { color: #9CA3AF; }
+    .drag-handle:active { cursor: grabbing; }
+    .task-ck { width: 19px; height: 19px; min-width: 19px; border-radius: 50%; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: all 0.15s; }
+    .task-ck:hover { border-color: ${EM}; background: ${EM_LIGHT}; }
     .task-ck.done { background: ${EM}; border-color: ${EM}; }
     .task-title { flex: 1; font-size: 14px; font-weight: 500; color: #111827; }
     .task-card.done .task-title { text-decoration: line-through; color: #9CA3AF; }
-    .task-meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-left: 29px; }
+    .task-meta { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-left: 55px; cursor: pointer; }
     .sbs-tag { font-size: 10.5px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
     .sbs-date { font-size: 11.5px; color: #9CA3AF; display: flex; align-items: center; gap: 3px; }
     .sbs-date.alert { color: #B45309; }
     .notif-pill { font-size: 11px; background: ${EM_LIGHT}; color: ${EM_DARK}; padding: 2px 7px; border-radius: 20px; display: flex; align-items: center; gap: 3px; }
-    .prog { height: 3px; background: #F3F4F6; border-radius: 2px; margin-top: 10px; margin-left: 29px; overflow: hidden; }
+    .prog { height: 3px; background: #F3F4F6; border-radius: 2px; margin-top: 10px; margin-left: 55px; overflow: hidden; cursor: pointer; }
     .prog-fill { height: 100%; background: ${EM}; border-radius: 2px; transition: width 0.3s; }
     .add-btn { border: 1.5px dashed #E5E7EB; border-radius: 10px; padding: 11px 16px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: #9CA3AF; font-size: 13.5px; font-family: inherit; background: none; width: 100%; margin-top: 4px; }
     .add-btn:hover { border-color: ${EM_MID}; color: ${EM}; background: ${EM_LIGHT}; }
@@ -196,6 +288,7 @@ export default function StepByStepApp() {
     .sub-t.done { text-decoration: line-through; color: #9CA3AF; }
     .del-btn { background: none; border: none; cursor: pointer; color: #D1D5DB; padding: 2px; display: flex; }
     .del-btn:hover { color: #EF4444; }
+    .dnd-hint { font-size: 11px; color: #9CA3AF; display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
     .sbs-search-w { position: relative; margin-bottom: 14px; }
     .sbs-search { width: 100%; padding: 8px 12px 8px 36px; border: 0.5px solid #E5E7EB; border-radius: 8px; font-size: 13.5px; outline: none; font-family: inherit; background: #fff; }
     .sbs-search:focus { border-color: ${EM_MID}; }
@@ -222,31 +315,45 @@ export default function StepByStepApp() {
     .empty a { color: ${EM}; cursor: pointer; font-weight: 500; }
   `;
 
+  const TaskListWithDnd = ({ taskList, label }) => (
+    <>
+      {label && <div className="sec-label">{label}</div>}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTaskDragEnd}>
+        <SortableContext items={taskList.map(t => t.id)} strategy={verticalListSortingStrategy}>
+          <div className="task-list">
+            {taskList.map(t => (
+              <SortableTaskCard
+                key={t.id}
+                task={t}
+                pct={getPct(t)}
+                proj={getProject(t.projectId)}
+                onToggleDone={toggleTaskDone}
+                onOpen={(id) => { setSelectedId(id); setView('detail'); }}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </>
+  );
+
   return (
     <div className="sbs">
       <style>{css}</style>
 
-      {/* ONBOARDING */}
       {showOnboarding && (
         <Onboarding
-          onComplete={() => {
-            localStorage.setItem('sbs_onboarded', '1');
-            setShowOnboarding(false);
-          }}
-          onCreateProject={(proj) => {
-            const p = { id: generateId(), ...proj };
-            setProjects(prev => [...prev, p]);
-          }}
+          onComplete={() => { localStorage.setItem('sbs_onboarded', '1'); setShowOnboarding(false); }}
+          onCreateProject={(proj) => { const p = { id: generateId(), ...proj }; setProjects(prev => [...prev, p]); }}
         />
       )}
 
-      {/* HEADER */}
       <header className="sbs-header">
         <div className="sbs-logo">
           <div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div>
           Step by Step
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6 }}>
           <button className="sbs-icon-btn"><Search size={16} /></button>
           <button className="sbs-icon-btn"><Bell size={16} /></button>
           <button className="sbs-icon-btn" title="Revoir l'intro" onClick={() => { localStorage.removeItem('sbs_onboarded'); setShowOnboarding(true); }}><Settings size={16} /></button>
@@ -254,7 +361,6 @@ export default function StepByStepApp() {
       </header>
 
       <div className="sbs-body">
-        {/* SIDEBAR */}
         <nav className="sbs-sidebar">
           <div className="sbs-sl" style={{ marginTop: 0 }}>Navigation</div>
           <button className={`sbs-nav ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
@@ -272,14 +378,12 @@ export default function StepByStepApp() {
               <Bell size={16} /> Rappels <span className="sbs-badge amber">{reminders.length}</span>
             </button>
           )}
-
           <div className="sbs-sl">Projets</div>
           <div className={`sbs-proj-row ${filterProject === 'tous' ? 'active' : ''}`} onClick={() => { setFilterProject('tous'); setView('tasks'); }}>
             <Folder size={14} /> Tous les projets
           </div>
           {projects.map(p => (
-            <div key={p.id} className={`sbs-proj-row ${filterProject === p.id ? 'active' : ''}`}
-              onClick={() => { setFilterProject(p.id); setView('tasks'); }}>
+            <div key={p.id} className={`sbs-proj-row ${filterProject === p.id ? 'active' : ''}`} onClick={() => { setFilterProject(p.id); setView('tasks'); }}>
               <div className="sbs-proj-dot" style={{ background: p.color }} />
               <span style={{ flex: 1 }}>{p.name}</span>
               <button className="sbs-proj-edit" onClick={e => { e.stopPropagation(); setEditProjectId(p.id); }}><Edit2 size={12} /></button>
@@ -288,74 +392,57 @@ export default function StepByStepApp() {
           <button className="sbs-nav" style={{ color: EM, marginTop: 2 }} onClick={() => setShowNewProject(true)}>
             <Plus size={15} /> Nouveau projet
           </button>
-
           <div style={{ marginTop: 'auto' }}>
             <button className="sbs-nav" onClick={openNew}><Plus size={16} /> Nouvelle tâche</button>
           </div>
         </nav>
 
-        {/* CONTENT */}
         <main className="sbs-content">
 
           {/* DASHBOARD */}
           {view === 'dashboard' && <>
             <div className="sbs-ch">
-              <div>
-                <div className="sbs-pt">Aujourd'hui</div>
-                <div className="sbs-ps" style={{ textTransform: 'capitalize' }}>{today} · {pending.length} tâche{pending.length !== 1 ? 's' : ''} restante{pending.length !== 1 ? 's' : ''}</div>
-              </div>
+              <div><div className="sbs-pt">Aujourd'hui</div><div className="sbs-ps">{today} · {pending.length} tâche{pending.length !== 1 ? 's' : ''} restante{pending.length !== 1 ? 's' : ''}</div></div>
               <button className="btn-p" onClick={openNew}><Plus size={15} /> Nouvelle tâche</button>
             </div>
+
             {reminders.length > 0 && (
-              <div className="sbs-banner"><Bell size={16} color={EM} /><span><strong style={{ fontWeight: 600 }}>{reminders.length} rappel{reminders.length > 1 ? 's' : ''} actif{reminders.length > 1 ? 's' : ''}</strong> — {reminders[0].title}</span></div>
+              <div className="sbs-banner">
+                <Bell size={16} color="#92400E" />
+                <span><strong style={{ fontWeight: 600 }}>{reminders.length} rappel{reminders.length > 1 ? 's' : ''} actif{reminders.length > 1 ? 's' : ''}</strong> — {reminders[0].title}</span>
+              </div>
             )}
+
             <div className="sbs-stats">
               <div className="sbs-stat"><div className="sbs-sv g">{done.length}</div><div className="sbs-sl2">Terminées</div><div className="sbs-ssub">sur {tasks.length}</div></div>
               <div className="sbs-stat"><div className="sbs-sv">{pending.length}</div><div className="sbs-sl2">En cours</div><div className="sbs-ssub">{reminders.length} avec rappel</div></div>
               <div className="sbs-stat"><div className="sbs-sv g">{tasks.length ? Math.round(done.length / tasks.length * 100) : 0}%</div><div className="sbs-sl2">Complétion</div></div>
             </div>
-            {tasks.length === 0 ? (
-              <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche pour le moment.</p><a onClick={openNew}>Créer une tâche →</a></div>
-            ) : <>
-              {pending.length > 0 && <>
-                <div className="sec-label">En cours</div>
-                <div className="task-list">{pending.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}</div>
-              </>}
-              {done.length > 0 && <>
-                <div className="sec-label">Terminées</div>
-                <div className="task-list">
-                  {done.map(t => (
-                    <div key={t.id} className="task-card done" onClick={() => { setSelectedId(t.id); setView('detail'); }}>
-                      <div className="task-top"><div className="task-ck done"><Check size={11} color="#fff" /></div><div className="task-title">{t.title}</div></div>
-                    </div>
-                  ))}
-                </div>
-              </>}
-            </>}
+
+            {tasks.length === 0
+              ? <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche.</p><a onClick={openNew}>Créer une tâche →</a></div>
+              : <>
+                {pending.length > 0 && <TaskListWithDnd taskList={pending} label="En cours" />}
+                {done.length > 0 && <TaskListWithDnd taskList={done} label="Terminées" />}
+              </>
+            }
             <button className="add-btn" onClick={openNew}><Plus size={16} /> Ajouter une tâche...</button>
           </>}
 
           {/* TÂCHES */}
           {view === 'tasks' && <>
             <div className="sbs-ch">
-              <div>
-                <div className="sbs-pt">{filterProject === 'tous' ? 'Toutes les tâches' : getProject(filterProject)?.name || 'Tâches'}</div>
-                <div className="sbs-ps">{filtered.length} tâche{filtered.length !== 1 ? 's' : ''}</div>
-              </div>
+              <div><div className="sbs-pt">{filterProject === 'tous' ? 'Toutes les tâches' : getProject(filterProject)?.name || 'Tâches'}</div><div className="sbs-ps">{filtered.length} tâche{filtered.length !== 1 ? 's' : ''}</div></div>
               <button className="btn-p" onClick={openNew}><Plus size={15} /> Nouvelle tâche</button>
             </div>
             <div className="sbs-search-w"><Search size={15} className="si" /><input className="sbs-search" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} /></div>
             <div className="filters">
               <button className={`filter-btn ${filterProject === 'tous' ? 'active' : ''}`} onClick={() => setFilterProject('tous')}>Tous</button>
-              {projects.map(p => (
-                <button key={p.id} className={`filter-btn ${filterProject === p.id ? 'active' : ''}`} onClick={() => setFilterProject(p.id)} style={{ borderColor: filterProject === p.id ? p.color : undefined, background: filterProject === p.id ? p.color + '22' : undefined, color: filterProject === p.id ? p.color : undefined }}>
-                  {p.name}
-                </button>
-              ))}
+              {projects.map(p => <button key={p.id} className={`filter-btn ${filterProject === p.id ? 'active' : ''}`} onClick={() => setFilterProject(p.id)} style={{ borderColor: filterProject === p.id ? p.color : undefined, background: filterProject === p.id ? p.color + '22' : undefined, color: filterProject === p.id ? p.color : undefined }}>{p.name}</button>)}
             </div>
             {filtered.length === 0
               ? <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche.</p><a onClick={openNew}>En créer une →</a></div>
-              : <div className="task-list">{filtered.map(t => <TaskCard key={t.id} task={t} pct={getPct(t)} proj={getProject(t.projectId)} onClick={() => { setSelectedId(t.id); setView('detail'); }} />)}</div>
+              : <TaskListWithDnd taskList={filtered} />
             }
           </>}
 
@@ -368,21 +455,14 @@ export default function StepByStepApp() {
               <div style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 12, padding: '20px 22px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
                   <div style={{ flex: 1, marginRight: 12 }}>
-                    {isEditing ? (
-                      <input className="sbs-input" style={{ fontSize: 17, fontWeight: 600, marginBottom: 10 }}
-                        value={editingTask.title} onChange={e => setEditingTask(t => ({ ...t, title: e.target.value }))} autoFocus />
-                    ) : (
-                      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 8px' }}>{selected.title}</h2>
-                    )}
+                    {isEditing
+                      ? <input className="sbs-input" style={{ fontSize: 17, fontWeight: 600, marginBottom: 10 }} value={editingTask.title} onChange={e => setEditingTask(t => ({ ...t, title: e.target.value }))} autoFocus />
+                      : <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 8px' }}>{selected.title}</h2>
+                    }
                     {isEditing ? (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                        <select className="sbs-select" value={editingTask.priority} onChange={e => setEditingTask(t => ({ ...t, priority: e.target.value }))}>
-                          <option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option>
-                        </select>
-                        <select className="sbs-select" value={editingTask.projectId} onChange={e => setEditingTask(t => ({ ...t, projectId: e.target.value }))}>
-                          <option value="">Sans projet</option>
-                          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <select className="sbs-select" value={editingTask.priority} onChange={e => setEditingTask(t => ({ ...t, priority: e.target.value }))}><option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option></select>
+                        <select className="sbs-select" value={editingTask.projectId || ''} onChange={e => setEditingTask(t => ({ ...t, projectId: e.target.value }))}><option value="">Sans projet</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                         <input type="datetime-local" className="sbs-input" value={editingTask.dueDate || ''} onChange={e => setEditingTask(t => ({ ...t, dueDate: e.target.value }))} style={{ gridColumn: '1/-1' }} />
                       </div>
                     ) : (
@@ -395,22 +475,13 @@ export default function StepByStepApp() {
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                     {isEditing ? (
-                      <>
-                        <button className="btn-p" style={{ padding: '5px 10px', fontSize: 13 }} onClick={saveEdit}><Save size={13} /> Enregistrer</button>
-                        <button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask(null)}><X size={14} /></button>
-                      </>
+                      <><button className="btn-p" style={{ padding: '5px 10px', fontSize: 13 }} onClick={saveEdit}><Save size={13} /> Enregistrer</button><button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask(null)}><X size={14} /></button></>
                     ) : (
-                      <>
-                        <button className={`reminder-btn${selected.reminder ? ' on' : ''}`} onClick={() => toggleReminder(selected.id)}>
-                          {selected.reminder ? <Bell size={13} /> : <BellOff size={13} />}
-                          {selected.reminder ? 'Rappel actif' : 'Rappel'}
-                        </button>
-                        <button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask({ ...selected })}><Edit2 size={14} /></button>
-                        <button className="btn-danger" onClick={() => delTask(selected.id)}><Trash2 size={14} /></button>
-                      </>
+                      <><button className={`reminder-btn${selected.reminder ? ' on' : ''}`} onClick={() => toggleReminder(selected.id)}>{selected.reminder ? <Bell size={13} /> : <BellOff size={13} />}{selected.reminder ? 'Rappel actif' : 'Rappel'}</button><button className="btn-s" style={{ padding: '5px 9px' }} onClick={() => setEditingTask({ ...selected })}><Edit2 size={14} /></button><button className="btn-danger" onClick={() => delTask(selected.id)}><Trash2 size={14} /></button></>
                     )}
                   </div>
                 </div>
+
                 {selected.subtasks.length > 0 && <>
                   <div style={{ height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: EM, borderRadius: 3, transition: 'width 0.3s' }} />
@@ -420,17 +491,20 @@ export default function StepByStepApp() {
                     <span style={{ color: pct === 100 ? EM : '#9CA3AF', fontWeight: pct === 100 ? 600 : 400 }}>{pct}%{pct === 100 ? ' — Terminé !' : ''}</span>
                   </div>
                 </>}
-                <div className="sec-label" style={{ marginBottom: 6 }}>Sous-tâches</div>
-                {selected.subtasks.map(sub => (
-                  <div key={sub.id} className="sub-row">
-                    <div className={`cb${sub.done ? ' done' : ''}`} onClick={() => toggleSub(selected.id, sub.id)}>{sub.done && <Check size={12} color="#fff" />}</div>
-                    <span className={`sub-t${sub.done ? ' done' : ''}`}>{sub.title}</span>
-                    <button className="del-btn" onClick={() => delSub(selected.id, sub.id)}><X size={14} /></button>
-                  </div>
-                ))}
+
+                <div className="sec-label" style={{ marginBottom: 4 }}>Sous-tâches</div>
+                {selected.subtasks.length > 1 && <div className="dnd-hint"><GripVertical size={11} /> Glisse pour réorganiser</div>}
+
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleSubDragEnd(selected.id, e)}>
+                  <SortableContext items={selected.subtasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                    {selected.subtasks.map(sub => (
+                      <SortableSubtask key={sub.id} sub={sub} taskId={selected.id} onToggle={toggleSub} onDelete={delSub} />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <input className="sbs-input" placeholder="Ajouter une étape..." value={newSubtask}
-                    onChange={e => setNewSubtask(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSub(selected.id)} />
+                  <input className="sbs-input" placeholder="Ajouter une étape..." value={newSubtask} onChange={e => setNewSubtask(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSub(selected.id)} />
                   <button className="btn-p" onClick={() => addSub(selected.id)} style={{ padding: '8px 12px' }}><Plus size={15} /></button>
                 </div>
               </div>
@@ -475,22 +549,6 @@ export default function StepByStepApp() {
                 </div>
               );
             })}
-            {tasks.filter(t => !t.projectId).length > 0 && (
-              <div>
-                <div style={{ fontSize: 12, color: '#9CA3AF', marginBottom: 8 }}>Sans projet</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {tasks.filter(t => !t.projectId).map(t => {
-                    const pct = getPct(t);
-                    return (
-                      <div key={t.id} style={{ background: '#fff', border: '0.5px solid #E5E7EB', borderRadius: 9, padding: '10px 14px', cursor: 'pointer' }} onClick={() => { setSelectedId(t.id); setView('detail'); }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}><span style={{ fontSize: 13.5, fontWeight: 500 }}>{t.title}</span><span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? EM : '#9CA3AF' }}>{pct}%</span></div>
-                        <div style={{ height: 3, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}><div style={{ height: '100%', width: `${pct}%`, background: EM, borderRadius: 2 }} /></div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </>}
 
         </main>
@@ -504,33 +562,14 @@ export default function StepByStepApp() {
               <span style={{ fontSize: 17, fontWeight: 600 }}>Nouvelle tâche</span>
               <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setShowNew(false)}><X size={18} /></button>
             </div>
-            <div style={{ marginBottom: 13 }}>
-              <label className="field-label">Titre</label>
-              <input className="sbs-input" placeholder="Titre..." value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createTask()} autoFocus />
-            </div>
+            <div style={{ marginBottom: 13 }}><label className="field-label">Titre</label><input className="sbs-input" placeholder="Titre..." value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createTask()} autoFocus /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 13 }}>
-              <div>
-                <label className="field-label">Priorité</label>
-                <select className="sbs-select" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
-                  <option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option>
-                </select>
-              </div>
-              <div>
-                <label className="field-label">Projet</label>
-                <select className="sbs-select" value={form.projectId} onChange={e => setForm(f => ({ ...f, projectId: e.target.value }))}>
-                  <option value="">Sans projet</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
+              <div><label className="field-label">Priorité</label><select className="sbs-select" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}><option value="high">Urgent</option><option value="medium">Moyen</option><option value="low">Faible</option></select></div>
+              <div><label className="field-label">Projet</label><select className="sbs-select" value={form.projectId} onChange={e => setForm(f => ({ ...f, projectId: e.target.value }))}><option value="">Sans projet</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
             </div>
-            <div style={{ marginBottom: 13 }}>
-              <label className="field-label">Échéance</label>
-              <input type="datetime-local" className="sbs-input" value={form.dueDate} onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} />
-            </div>
+            <div style={{ marginBottom: 13 }}><label className="field-label">Échéance</label><input type="datetime-local" className="sbs-input" value={form.dueDate} onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} /></div>
             <div className="toggle-row" style={{ marginBottom: 20 }} onClick={() => setForm(f => ({ ...f, reminder: !f.reminder }))}>
-              <div className="toggle" style={{ background: form.reminder ? EM : '#D1D5DB' }}>
-                <div className="toggle-th" style={{ left: form.reminder ? 18 : 2 }} />
-              </div>
+              <div className="toggle" style={{ background: form.reminder ? EM : '#D1D5DB' }}><div className="toggle-th" style={{ left: form.reminder ? 18 : 2 }} /></div>
               <span style={{ fontSize: 13, color: '#374151' }}>Rappel 30 min avant</span>
             </div>
             <button className="btn-p" style={{ width: '100%', justifyContent: 'center', padding: 11, fontSize: 14 }} onClick={createTask} disabled={!form.title.trim()}>Créer la tâche</button>
@@ -546,20 +585,8 @@ export default function StepByStepApp() {
               <span style={{ fontSize: 17, fontWeight: 600 }}>Nouveau projet</span>
               <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setShowNewProject(false)}><X size={18} /></button>
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <label className="field-label">Nom du projet</label>
-              <input className="sbs-input" placeholder="Ex : Freelance, Perso..." value={projectForm.name} onChange={e => setProjectForm(f => ({ ...f, name: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createProject()} autoFocus />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <label className="field-label">Couleur</label>
-              <div className="color-picker">
-                {PROJECT_COLORS.map(c => (
-                  <div key={c} className={`color-dot ${projectForm.color === c ? 'selected' : ''}`} style={{ background: c }} onClick={() => setProjectForm(f => ({ ...f, color: c }))}>
-                    {projectForm.color === c && <Check size={13} color="#fff" />}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <div style={{ marginBottom: 14 }}><label className="field-label">Nom</label><input className="sbs-input" placeholder="Ex : Freelance, Perso..." value={projectForm.name} onChange={e => setProjectForm(f => ({ ...f, name: e.target.value }))} onKeyDown={e => e.key === 'Enter' && createProject()} autoFocus /></div>
+            <div style={{ marginBottom: 20 }}><label className="field-label">Couleur</label><div className="color-picker">{PROJECT_COLORS.map(c => <div key={c} className={`color-dot ${projectForm.color === c ? 'selected' : ''}`} style={{ background: c }} onClick={() => setProjectForm(f => ({ ...f, color: c }))}>{projectForm.color === c && <Check size={13} color="#fff" />}</div>)}</div></div>
             <button className="btn-p" style={{ width: '100%', justifyContent: 'center', padding: 11 }} onClick={createProject} disabled={!projectForm.name.trim()}>Créer le projet</button>
           </div>
         </div>
@@ -576,22 +603,8 @@ export default function StepByStepApp() {
                 <span style={{ fontSize: 17, fontWeight: 600 }}>Modifier le projet</span>
                 <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }} onClick={() => setEditProjectId(null)}><X size={18} /></button>
               </div>
-              <div style={{ marginBottom: 14 }}>
-                <label className="field-label">Nom</label>
-                <input className="sbs-input" value={proj.name}
-                  onChange={e => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, name: e.target.value } : p))} autoFocus />
-              </div>
-              <div style={{ marginBottom: 20 }}>
-                <label className="field-label">Couleur</label>
-                <div className="color-picker">
-                  {PROJECT_COLORS.map(c => (
-                    <div key={c} className={`color-dot ${proj.color === c ? 'selected' : ''}`} style={{ background: c }}
-                      onClick={() => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, color: c } : p))}>
-                      {proj.color === c && <Check size={13} color="#fff" />}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <div style={{ marginBottom: 14 }}><label className="field-label">Nom</label><input className="sbs-input" value={proj.name} onChange={e => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, name: e.target.value } : p))} autoFocus /></div>
+              <div style={{ marginBottom: 20 }}><label className="field-label">Couleur</label><div className="color-picker">{PROJECT_COLORS.map(c => <div key={c} className={`color-dot ${proj.color === c ? 'selected' : ''}`} style={{ background: c }} onClick={() => setProjects(prev => prev.map(p => p.id === editProjectId ? { ...p, color: c } : p))}>{proj.color === c && <Check size={13} color="#fff" />}</div>)}</div></div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn-p" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setEditProjectId(null)}>Enregistrer</button>
                 <button className="btn-danger" onClick={() => deleteProject(editProjectId)}><Trash2 size={15} /></button>
@@ -600,27 +613,6 @@ export default function StepByStepApp() {
           </div>
         );
       })()}
-    </div>
-  );
-}
-
-function TaskCard({ task, pct, proj, onClick }) {
-  const pri = PRIORITY[task.priority]; const due = formatDue(task.dueDate);
-  return (
-    <div className="task-card" onClick={onClick}>
-      <div className="task-top">
-        <div className="task-ck"><Circle size={9} color="#D1D5DB" /></div>
-        <div className="task-title">{task.title}</div>
-        <ChevronRight size={15} color="#D1D5DB" />
-      </div>
-      <div className="task-meta">
-        <span className="sbs-tag" style={{ background: pri.bg, color: pri.color, border: `0.5px solid ${pri.border}` }}>{pri.label}</span>
-        {proj && <span className="sbs-date"><div style={{ width: 6, height: 6, borderRadius: '50%', background: proj.color, display: 'inline-block' }} /> {proj.name}</span>}
-        {due && <span className={`sbs-date${due.alert ? ' alert' : ''}`}><Clock size={11} />{due.label}</span>}
-        {task.reminder && <span className="notif-pill"><Bell size={10} /> Rappel</span>}
-        {task.subtasks.length > 0 && <span className="sbs-date">{task.subtasks.filter(s => s.done).length}/{task.subtasks.length} étapes</span>}
-      </div>
-      {task.subtasks.length > 0 && <div className="prog"><div className="prog-fill" style={{ width: `${pct}%` }} /></div>}
     </div>
   );
 }
