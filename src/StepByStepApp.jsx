@@ -19,15 +19,13 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-// ── Palette ──────────────────────────────────────────────────────────────────
-const PR       = '#0091ff';   // bleu principal
-const PR_LIGHT = '#b1d5ff';   // bleu clair
-const PR_DARK  = '#0066cc';   // bleu foncé
-const PR_BG    = '#f0f7ff';   // fond bleu très léger
-const PR_MID   = '#66b8ff';   // bleu intermédiaire
-const AC       = '#4e3fd5';   // violet accent
-const AC_LIGHT = '#ede9fe';   // violet très clair
-// ─────────────────────────────────────────────────────────────────────────────
+const PR       = '#0091ff';
+const PR_LIGHT = '#b1d5ff';
+const PR_DARK  = '#0066cc';
+const PR_BG    = '#f0f7ff';
+const PR_MID   = '#66b8ff';
+const AC       = '#4e3fd5';
+const AC_LIGHT = '#ede9fe';
 
 const PRIORITY = {
   high:   { label: 'Urgent', bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
@@ -165,17 +163,17 @@ function AppShell({ user, logo }) {
     setEditingTask(null);
   };
 
-  const getProject = (pid) => projects.find(p => p.id === pid);
-  const activeTasks   = tasks.filter(t => !t.archived);
-  const archivedTasks = tasks.filter(t => t.archived);
-  const filtered      = activeTasks.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()) && (filterProject === 'tous' || t.projectId === filterProject));
-  const pending       = activeTasks.filter(t => getPct(t) < 100);
-  const done          = activeTasks.filter(t => getPct(t) === 100);
-  const reminders     = activeTasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
-  const selected      = tasks.find(t => t.id === selectedId);
-  const today         = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const getProject   = (pid) => projects.find(p => p.id === pid);
+  const activeTasks  = tasks.filter(t => !t.archived);
+  const archivedTasks= tasks.filter(t => t.archived);
+  const filtered     = activeTasks.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()) && (filterProject === 'tous' || t.projectId === filterProject));
+  const pending      = activeTasks.filter(t => getPct(t) < 100);
+  const done         = activeTasks.filter(t => getPct(t) === 100);
+  const reminders    = activeTasks.filter(t => t.reminder && t.dueDate && getPct(t) < 100);
+  const selected     = tasks.find(t => t.id === selectedId);
+  const today        = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const calYear = calDate.getFullYear(); const calMonth = calDate.getMonth();
+  const calYear  = calDate.getFullYear(); const calMonth = calDate.getMonth();
   const startDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const lastDay  = new Date(calYear, calMonth + 1, 0).getDate();
   const calCells = [...Array(startDow).fill(null), ...Array.from({ length: lastDay }, (_, i) => i + 1)];
@@ -214,17 +212,20 @@ function AppShell({ user, logo }) {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     .sbs { background: #F8FAFF; min-height: 100vh; color: #111827; font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; }
 
+    /* HEADER */
     .sbs-header { background: #fff; border-bottom: 0.5px solid #E5E7EB; padding: 0 20px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; }
-    .sbs-logo { display: flex; align-items: center; gap: 10px; }
+    .sbs-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
     .sbs-logo-icon { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, ${AC}, ${PR}); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .sbs-logo-text { font-size: 16px; font-weight: 600; background: linear-gradient(135deg, ${AC}, ${PR}); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .sbs-icon-btn { width: 34px; height: 34px; border-radius: 8px; border: 0.5px solid #E5E7EB; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6B7280; flex-shrink: 0; }
     .sbs-icon-btn:hover { background: ${PR_BG}; color: ${PR}; border-color: ${PR_LIGHT}; }
 
+    /* LAYOUT */
     .sbs-body { display: flex; min-height: calc(100vh - 56px); position: relative; }
     .sbs-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; }
     @media (max-width: 768px) { .sbs-overlay-bg.open { display: block; } }
 
+    /* SIDEBAR */
     .sbs-sidebar { background: #fff; border-right: 0.5px solid #E5E7EB; width: 224px; flex-shrink: 0; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
     @media (max-width: 768px) { .sbs-sidebar { position: fixed; top: 56px; left: -224px; height: calc(100vh - 56px); z-index: 45; transition: left 0.25s ease; } .sbs-sidebar.open { left: 0; } }
 
@@ -242,20 +243,22 @@ function AppShell({ user, logo }) {
     .sbs-proj-edit { margin-left: auto; opacity: 0; background: none; border: none; cursor: pointer; color: #9CA3AF; padding: 2px; display: flex; }
     .sbs-proj-row:hover .sbs-proj-edit { opacity: 1; }
 
+    /* CONTENT */
     .sbs-content { flex: 1; padding: 22px; overflow-y: auto; min-width: 0; }
     @media (max-width: 480px) { .sbs-content { padding: 16px 14px; } }
-
     .sbs-ch { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
     .sbs-pt { font-size: 20px; font-weight: 600; color: #111827; }
     .sbs-ps { font-size: 13px; color: #9CA3AF; margin-top: 3px; text-transform: capitalize; }
 
-    .btn-p { background: linear-gradient(135deg, ${AC}, ${PR}); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; flex-shrink: 0; }
-    .btn-p:hover { opacity: 0.9; }
+    /* BUTTONS */
+    .btn-p { background: ${PR}; color: #fff; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
+    .btn-p:hover { background: ${PR_DARK}; }
     .btn-p:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-s { background: #fff; color: #374151; border: 0.5px solid #D1D5DB; border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
     .btn-s:hover { border-color: ${PR_LIGHT}; color: ${PR}; }
     .btn-danger { background: #fff; color: #EF4444; border: 0.5px solid #FECACA; border-radius: 7px; padding: 5px 9px; cursor: pointer; display: flex; align-items: center; font-family: inherit; }
 
+    /* STATS */
     .sbs-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 20px; }
     .sbs-stat { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; }
     .sbs-sv { font-size: 22px; font-weight: 600; color: #111827; }
@@ -265,6 +268,7 @@ function AppShell({ user, logo }) {
 
     .sbs-banner { background: #FFFBEB; border: 0.5px solid #FDE68A; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 13px; color: #92400E; }
 
+    /* TASKS */
     .sec-label { font-size: 10.5px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
     .task-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
     .task-card { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 11px; padding: 13px 14px; transition: border-color 0.15s, box-shadow 0.15s; }
@@ -276,29 +280,31 @@ function AppShell({ user, logo }) {
     .drag-handle:active { cursor: grabbing; }
     .task-ck { width: 19px; height: 19px; min-width: 19px; border-radius: 50%; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; transition: all 0.15s; }
     .task-ck:hover { border-color: ${PR}; background: ${PR_BG}; }
-    .task-ck.done { background: linear-gradient(135deg, ${AC}, ${PR}); border-color: ${PR}; }
+    .task-ck.done { background: ${PR}; border-color: ${PR}; }
     .task-title { flex: 1; font-size: 14px; font-weight: 500; color: #111827; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .task-card.done .task-title { text-decoration: line-through; color: #9CA3AF; }
     .task-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-left: 51px; cursor: pointer; }
     .sbs-tag { font-size: 10.5px; font-weight: 500; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
     .sbs-date { font-size: 11.5px; color: #9CA3AF; display: flex; align-items: center; gap: 3px; white-space: nowrap; }
     .sbs-date.alert { color: #B45309; }
-    .notif-pill { font-size: 11px; background: ${PR_BG}; color: ${PR_DARK}; padding: 2px 7px; border-radius: 20px; display: flex; align-items: center; gap: 3px; }
+    .notif-pill { font-size: 11px; background: ${PR_BG}; color: ${PR}; padding: 2px 7px; border-radius: 20px; display: flex; align-items: center; gap: 3px; }
     .prog { height: 3px; background: #F3F4F6; border-radius: 2px; margin-top: 10px; margin-left: 51px; overflow: hidden; cursor: pointer; }
-    .prog-fill { height: 100%; background: linear-gradient(90deg, ${AC}, ${PR}); border-radius: 2px; transition: width 0.3s; }
+    .prog-fill { height: 100%; background: ${PR}; border-radius: 2px; transition: width 0.3s; }
     .add-btn { border: 1.5px dashed #E5E7EB; border-radius: 10px; padding: 11px 16px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: #9CA3AF; font-size: 13.5px; font-family: inherit; background: none; width: 100%; margin-top: 4px; }
     .add-btn:hover { border-color: ${PR_LIGHT}; color: ${PR}; background: ${PR_BG}; }
 
+    /* SUBTASKS */
     .sub-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 0.5px solid #F9FAFB; }
     .cb { width: 20px; height: 20px; min-width: 20px; border-radius: 6px; border: 1.5px solid #D1D5DB; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
     .cb:hover { border-color: ${PR}; }
-    .cb.done { background: linear-gradient(135deg, ${AC}, ${PR}); border-color: ${PR}; }
+    .cb.done { background: ${PR}; border-color: ${PR}; }
     .sub-t { flex: 1; font-size: 13.5px; color: #374151; }
     .sub-t.done { text-decoration: line-through; color: #9CA3AF; }
     .del-btn { background: none; border: none; cursor: pointer; color: #D1D5DB; padding: 2px; display: flex; }
     .del-btn:hover { color: #EF4444; }
     .dnd-hint { font-size: 11px; color: #9CA3AF; display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
 
+    /* SEARCH */
     .sbs-search-w { position: relative; margin-bottom: 14px; }
     .sbs-search { width: 100%; padding: 8px 12px 8px 36px; border: 0.5px solid #E5E7EB; border-radius: 8px; font-size: 13.5px; outline: none; font-family: inherit; background: #fff; }
     .sbs-search:focus { border-color: ${PR_LIGHT}; box-shadow: 0 0 0 3px ${PR_BG}; }
@@ -307,6 +313,7 @@ function AppShell({ user, logo }) {
     .filter-btn { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-family: inherit; cursor: pointer; border: 0.5px solid #E5E7EB; background: #fff; color: #6B7280; }
     .filter-btn.active { background: ${PR_BG}; color: ${PR}; border-color: ${PR_LIGHT}; font-weight: 500; }
 
+    /* MODALS */
     .sbs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.38); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
     .sbs-modal { background: #fff; border-radius: 14px; padding: 24px; width: 100%; max-width: 450px; max-height: 90vh; overflow-y: auto; }
     .modal-sm { max-width: 360px; }
@@ -328,7 +335,7 @@ function AppShell({ user, logo }) {
     .detail-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
     @media (max-width: 480px) { .detail-actions { width: 100%; margin-top: 10px; justify-content: flex-start; } .detail-head { flex-wrap: wrap; } }
 
-    /* CALENDRIER */
+    /* CALENDAR */
     .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
     .cal-title { font-size: 16px; font-weight: 600; color: #111827; }
     .cal-nav-btn { background: #fff; border: 0.5px solid #E5E7EB; border-radius: 7px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6B7280; }
@@ -369,8 +376,10 @@ function AppShell({ user, logo }) {
       <style>{css}</style>
       <header className="sbs-header">
         <div className="sbs-logo">
-          <div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div>
-          {logo ? <img src={logo} alt="Step by Step" style={{ height: 24 }} /> : <span className="sbs-logo-text">Step by Step</span>}
+          {logo
+            ? <img src={logo} alt="Step by Step" style={{ height: 28, objectFit: 'contain' }} />
+            : <><div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div><span className="sbs-logo-text">Step by Step</span></>
+          }
         </div>
       </header>
       <div className="sbs-loading">
@@ -385,9 +394,7 @@ function AppShell({ user, logo }) {
       <style>{css}</style>
       <div className="sbs-loading">
         <AlertCircle size={32} color="#EF4444" />
-        <span style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', maxWidth: 280 }}>
-          Impossible de charger tes données. Vérifie ta connexion et réessaie.
-        </span>
+        <span style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', maxWidth: 280 }}>Impossible de charger tes données. Vérifie ta connexion et réessaie.</span>
         <button className="btn-p" onClick={() => window.location.reload()}>Réessayer</button>
       </div>
     </div>
@@ -412,12 +419,10 @@ function AppShell({ user, logo }) {
           </button>
           <style>{`@media(max-width:768px){#menu-btn{display:flex!important}}`}</style>
           <div className="sbs-logo">
-            <div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div>
             {logo
-              ? <img src={logo} alt="Step by Step" style={{ height: 24 }} id="logo-img" />
-              : <span className="sbs-logo-text" id="logo-text">Step by Step</span>
+              ? <img src={logo} alt="Step by Step" style={{ height: 28, objectFit: 'contain' }} id="logo-img" />
+              : <><div className="sbs-logo-icon"><Check size={16} color="#fff" strokeWidth={2.5} /></div><span className="sbs-logo-text">Step by Step</span></>
             }
-            <style>{`@media(max-width:400px){#logo-text,#logo-img{display:none!important}}`}</style>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -597,7 +602,7 @@ function AppShell({ user, logo }) {
 
                 {selected.subtasks?.length > 0 && <>
                   <div style={{ height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden', marginBottom: 5 }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${AC}, ${PR})`, borderRadius: 3, transition: 'width 0.3s' }} />
+                    <div style={{ height: '100%', width: `${pct}%`, background: PR, borderRadius: 3, transition: 'width 0.3s' }} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9CA3AF', marginBottom: 16 }}>
                     <span>{selected.subtasks.filter(s => s.done).length}/{selected.subtasks.length} étapes</span>
@@ -657,7 +662,7 @@ function AppShell({ user, logo }) {
                             <span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? PR : '#9CA3AF' }}>{pct}%</span>
                           </div>
                           <div style={{ height: 3, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${AC}, ${proj.color})`, borderRadius: 2 }} />
+                            <div style={{ height: '100%', width: `${pct}%`, background: proj.color, borderRadius: 2 }} />
                           </div>
                         </div>
                       );
@@ -695,13 +700,13 @@ function AppShell({ user, logo }) {
         <button className={`bottom-nav-btn ${view === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('dashboard')}><LayoutDashboard size={20} />Aujourd'hui</button>
         <button className={`bottom-nav-btn ${view === 'tasks' || view === 'detail' ? 'active' : ''}`} onClick={() => navigate('tasks')}><ListChecks size={20} />Tâches</button>
         <button className="bottom-nav-btn" onClick={openNew} style={{ color: PR }}>
-          <div style={{ width: 36, height: 36, borderRadius: '50%', background: `linear-gradient(135deg, ${AC}, ${PR})`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: -4 }}><Plus size={20} color="#fff" /></div>
+          <div style={{ width: 36, height: 36, borderRadius: '50%', background: PR, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: -4 }}><Plus size={20} color="#fff" /></div>
         </button>
         <button className={`bottom-nav-btn ${view === 'calendar' ? 'active' : ''}`} onClick={() => navigate('calendar')}><Calendar size={20} />Calendrier</button>
         <button className={`bottom-nav-btn ${view === 'progress' ? 'active' : ''}`} onClick={() => navigate('progress')}><TrendingUp size={20} />Stats</button>
       </nav>
 
-      {/* MODALS */}
+      {/* MODAL NOUVELLE TÂCHE */}
       {showNew && (
         <div className="sbs-overlay" onClick={() => setShowNew(false)}>
           <div className="sbs-modal" onClick={e => e.stopPropagation()}>
@@ -724,6 +729,7 @@ function AppShell({ user, logo }) {
         </div>
       )}
 
+      {/* MODAL NOUVEAU PROJET */}
       {showNewProject && (
         <div className="sbs-overlay" onClick={() => setShowNewProject(false)}>
           <div className="sbs-modal modal-sm" onClick={e => e.stopPropagation()}>
@@ -738,6 +744,7 @@ function AppShell({ user, logo }) {
         </div>
       )}
 
+      {/* MODAL ÉDITION PROJET */}
       {editProjectId && (() => {
         const proj = projects.find(p => p.id === editProjectId);
         if (!proj) return null;
@@ -766,17 +773,16 @@ export default function StepByStepApp() {
   const [user, setUser] = useState(undefined);
   const [logo, setLogo] = useState(null);
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, u => setUser(u || null));
-  }, []);
+  useEffect(() => { return onAuthStateChanged(auth, u => setUser(u || null)); }, []);
 
-  // Charge le logo depuis /logo.svg ou /logo.png
   useEffect(() => {
     const tryLogo = async () => {
       for (const ext of ['svg', 'png', 'jpg', 'webp']) {
         try {
           const res = await fetch(`/logo.${ext}`);
-          if (res.ok) { setLogo(`/logo.${ext}`); break; }
+          if (res.ok && res.headers.get('content-type')?.includes('image')) {
+            setLogo(`/logo.${ext}`); break;
+          }
         } catch {}
       }
     };
@@ -784,12 +790,10 @@ export default function StepByStepApp() {
   }, []);
 
   if (user === undefined) return (
-    <div style={{ minHeight: '100vh', background: '#F8FAFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <div style={{ width: 36, height: 36, border: `3px solid #b1d5ff`, borderTopColor: '#0091ff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-        <span style={{ fontSize: 14, color: '#9CA3AF' }}>Chargement...</span>
-      </div>
+    <div style={{ minHeight: '100vh', background: '#F8FAFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, sans-serif', flexDirection: 'column', gap: 16 }}>
+      <div style={{ width: 36, height: 36, border: `3px solid #b1d5ff`, borderTopColor: '#0091ff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <span style={{ fontSize: 14, color: '#9CA3AF' }}>Chargement...</span>
     </div>
   );
 
