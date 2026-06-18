@@ -17,6 +17,7 @@ import {
   arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import EmptyState from './EmptyState';
 
 const EM = '#059669'; const EM_LIGHT = '#D1FAE5'; const EM_DARK = '#065F46'; const EM_MID = '#6EE7B7';
 const PRIORITY = {
@@ -502,7 +503,7 @@ function AppShell({ user }) {
               <div className="sbs-stat"><div className="sbs-sv g">{activeTasks.length ? Math.round(done.length / activeTasks.length * 100) : 0}%</div><div className="sbs-sl2">Complétion</div></div>
             </div>
             {activeTasks.length === 0
-              ? <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche.</p><a onClick={() => setShowNew(true)}>Créer une tâche →</a></div>
+  ?           <EmptyState onCreateTask={() => setShowNew(true)} />
               : <>
                 {pending.length > 0 && <TaskListWithDnd taskList={pending} label="En cours" />}
                 {done.length > 0 && (
@@ -532,8 +533,12 @@ function AppShell({ user }) {
               <button className={`filter-btn ${filterProject === 'tous' ? 'active' : ''}`} onClick={() => setFilterProject('tous')}>Tous</button>
               {projects.map(p => <button key={p.id} className={`filter-btn ${filterProject === p.id ? 'active' : ''}`} onClick={() => setFilterProject(p.id)} style={{ borderColor: filterProject === p.id ? p.color : undefined, background: filterProject === p.id ? p.color + '22' : undefined, color: filterProject === p.id ? p.color : undefined }}>{p.name}</button>)}
             </div>
-            {filtered.length === 0 ? <div className="empty"><p style={{ marginBottom: 8 }}>Aucune tâche.</p><a onClick={() => setShowNew(true)}>En créer une →</a></div>
-              : <TaskListWithDnd taskList={filtered} />}
+            {activeTasks.length === 0
+              ? <EmptyState onCreateTask={() => setShowNew(true)} />
+              : filtered.length === 0
+                ? <div className="empty"><p>Aucune tâche dans ce projet.</p></div>
+                : <TaskListWithDnd taskList={filtered} />
+            }
           </>}
 
           {/* CALENDRIER */}
