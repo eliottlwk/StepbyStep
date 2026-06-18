@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import {
   collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc,
@@ -12,62 +12,75 @@ export function useFirestore(user) {
   const [tasks, setTasks]       = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const subUnsubsRef = useRef([]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
     const uid = user.uid;
+
+    // Timeout de sécurité — si rien après 6s, on arrête le loading
+    const timeout = setTimeout(() => setLoading(false), 6000);
+
+    let projectsDone = false;
+    let tasksDone = false;
+    const checkDone = () => { if (projectsDone && tasksDone) { clearTimeout(timeout); setLoading(false); } };
 
     const unsubProjects = onSnapshot(
       query(userCol(uid, 'projects'), orderBy('createdAt', 'asc')),
-      snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => {
+        setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        projectsDone = true;
+        checkDone();
+      },
+      err => { console.error('Projects error:', err); setError(err.message); projectsDone = true; checkDone(); }
     );
 
     const unsubTasks = onSnapshot(
       query(userCol(uid, 'tasks'), orderBy('position', 'asc')),
-      async snap => {
-        const taskList = await Promise.all(snap.docs.map(async d => {
-          const task = { id: d.id, ...d.data() };
-          const subSnap = await new Promise(resolve => {
-            const unsub = onSnapshot(
-              query(collection(db, 'users', uid, 'tasks', d.id, 'subtasks'), orderBy('position', 'asc')),
-              s => { resolve(s); unsub(); }
-            );
-          });
-          task.subtasks = subSnap.docs.map(s => ({ id: s.id, ...s.data() }));
-          return task;
-        }));
-        setTasks(taskList);
-        setLoading(false);
-      }
-    );
-
-    // Realtime subtasks
-    const subUnsubs = [];
-    const unsubTasksForSubs = onSnapshot(
-      query(userCol(uid, 'tasks'), orderBy('position', 'asc')),
       snap => {
-        subUnsubs.forEach(u => u());
-        subUnsubs.length = 0;
+        // Nettoyer les anciens listeners de sous-tâches
+        subUnsubsRef.current.forEach(u => u());
+        subUnsubsRef.current = [];
+
+        const taskMap = {};
+        snap.docs.forEach(d => { taskMap[d.id] = { id: d.id, ...d.data(), subtasks: [] }; });
+
+        if (snap.docs.length === 0) {
+          setTasks([]);
+          tasksDone = true;
+          checkDone();
+          return;
+        }
+
+        let resolvedCount = 0;
         snap.docs.forEach(d => {
           const unsub = onSnapshot(
             query(collection(db, 'users', uid, 'tasks', d.id, 'subtasks'), orderBy('position', 'asc')),
             subSnap => {
-              setTasks(prev => prev.map(t =>
-                t.id === d.id ? { ...t, subtasks: subSnap.docs.map(s => ({ id: s.id, ...s.data() })) } : t
-              ));
-            }
+              taskMap[d.id].subtasks = subSnap.docs.map(s => ({ id: s.id, ...s.data() }));
+              setTasks(Object.values(taskMap));
+              resolvedCount++;
+              if (resolvedCount >= snap.docs.length) { tasksDone = true; checkDone(); }
+            },
+            err => { console.error('Subtasks error:', err); resolvedCount++; if (resolvedCount >= snap.docs.length) { tasksDone = true; checkDone(); } }
           );
-          subUnsubs.push(unsub);
+          subUnsubsRef.current.push(unsub);
         });
-      }
+      },
+      err => { console.error('Tasks error:', err); setError(err.message); tasksDone = true; checkDone(); }
     );
 
-    return () => { unsubProjects(); unsubTasks(); unsubTasksForSubs(); subUnsubs.forEach(u => u()); };
+    return () => {
+      clearTimeout(timeout);
+      unsubProjects();
+      unsubTasks();
+      subUnsubsRef.current.forEach(u => u());
+    };
   }, [user]);
 
   const uid = user?.uid;
 
-  // ── PROJETS ──
   const createProject = (data) =>
     addDoc(userCol(uid, 'projects'), { ...data, createdAt: serverTimestamp() });
 
@@ -83,7 +96,6 @@ export function useFirestore(user) {
     await batch.commit();
   };
 
-  // ── TÂCHES ──
   const createTask = (data) =>
     addDoc(userCol(uid, 'tasks'), { ...data, position: tasks.length, createdAt: serverTimestamp() });
 
@@ -93,11 +105,9 @@ export function useFirestore(user) {
   const deleteTask = async (id) => {
     const batch = writeBatch(db);
     const task = tasks.find(t => t.id === id);
-    if (task?.subtasks) {
-      task.subtasks.forEach(s =>
-        batch.delete(doc(db, 'users', uid, 'tasks', id, 'subtasks', s.id))
-      );
-    }
+    task?.subtasks?.forEach(s =>
+      batch.delete(doc(db, 'users', uid, 'tasks', id, 'subtasks', s.id))
+    );
     batch.delete(userDoc(uid, 'tasks', id));
     await batch.commit();
   };
@@ -108,11 +118,13 @@ export function useFirestore(user) {
     await batch.commit();
   };
 
-  // ── SOUS-TÂCHES ──
   const addSubtask = (taskId, title) => {
+    if (!title?.trim()) return;
     const task = tasks.find(t => t.id === taskId);
     return addDoc(collection(db, 'users', uid, 'tasks', taskId, 'subtasks'), {
-      title, done: false, position: task?.subtasks?.length || 0, createdAt: serverTimestamp()
+      title: title.trim(), done: false,
+      position: task?.subtasks?.length || 0,
+      createdAt: serverTimestamp()
     });
   };
 
@@ -131,7 +143,7 @@ export function useFirestore(user) {
   };
 
   return {
-    tasks, projects, loading,
+    tasks, projects, loading, error,
     createProject, updateProject, deleteProject,
     createTask, updateTask, deleteTask, reorderTasks,
     addSubtask, updateSubtask, deleteSubtask, reorderSubtasks,
